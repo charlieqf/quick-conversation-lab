@@ -80,15 +80,22 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   }, [status]);
 
   // Data Fetching Helper
-  const getContextData = () => {
+  const fetchContextData = async () => {
     try {
-      const scenarios: Scenario[] = JSON.parse(localStorage.getItem('quick_scenarios') || '[]');
-      const roles: Role[] = JSON.parse(localStorage.getItem('quick_roles') || '[]');
-      const scenario = scenarios.find(s => s.id === scenarioId);
-      const role = roles.find(r => r.id === roleId);
+      const [resScen, resRole] = await Promise.all([
+        fetch(`/api/data/scenarios/${scenarioId}`),
+        fetch(`/api/data/roles/${roleId}`)
+      ]);
+
+      if (!resScen.ok || !resRole.ok) {
+        throw new Error('API Error');
+      }
+
+      const scenario: Scenario = await resScen.json();
+      const role: Role = await resRole.json();
       return { scenario, role };
     } catch (e) {
-      log('Error loading context data from storage', 'error');
+      log('Error loading context data from API', 'error');
       return { scenario: undefined, role: undefined };
     }
   };
@@ -105,7 +112,7 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
     currentTurnRef.current = { user: '', model: '' };
 
     // 0. Load Context
-    const { scenario, role } = getContextData();
+    const { scenario, role } = await fetchContextData();
     if (!scenario || !role) {
       setStatus('error');
       log('Failed to load Scenario or Role data.', 'error');

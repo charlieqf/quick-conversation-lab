@@ -39,12 +39,22 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
    };
 
    useEffect(() => {
-      loadHistory();
+      const loadMetadata = async () => {
+         try {
+            const [sRes, rRes] = await Promise.all([
+               fetch('/api/data/scenarios'),
+               fetch('/api/data/roles')
+            ]);
 
-      try {
-         setScenarios(JSON.parse(localStorage.getItem('quick_scenarios') || '[]'));
-         setRoles(JSON.parse(localStorage.getItem('quick_roles') || '[]'));
-      } catch (e) { }
+            if (sRes.ok) setScenarios(await sRes.json());
+            if (rRes.ok) setRoles(await rRes.json());
+         } catch (e) {
+            console.error("Failed to load metadata", e);
+         }
+      };
+
+      loadHistory();
+      loadMetadata();
    }, []);
 
    const handleSeedData = async () => {

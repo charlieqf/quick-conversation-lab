@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Users, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Plus, Users, AlertTriangle, Loader2 } from 'lucide-react';
 import { RoleCard } from './components/RoleCard';
 import { Role } from '../../types';
-import { INITIAL_ROLES } from '../../constants';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 
@@ -15,23 +14,31 @@ interface RoleSelectionModuleProps {
 
 export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack, onNavigate, scenarioId }) => {
   const [roles, setRoles] = useState<Role[]>([]);
-  const [deleteModalState, setDeleteModalState] = useState<{isOpen: boolean, roleId: string | null}>({
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean, roleId: string | null }>({
     isOpen: false,
     roleId: null
   });
 
-  useEffect(() => {
-    const saved = localStorage.getItem('quick_roles');
-    if (saved) {
-      try {
-        setRoles(JSON.parse(saved));
-      } catch (e) {
-        setRoles(INITIAL_ROLES);
-      }
-    } else {
-      setRoles(INITIAL_ROLES);
-      localStorage.setItem('quick_roles', JSON.stringify(INITIAL_ROLES));
+  const fetchRoles = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/data/roles');
+      if (!res.ok) throw new Error('Failed to load roles');
+      const data = await res.json();
+      setRoles(data);
+    } catch (err) {
+      setError('无法加载角色数据');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchRoles();
   }, []);
 
   const handleCreate = () => {
@@ -46,11 +53,22 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
     setDeleteModalState({ isOpen: true, roleId: id });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteModalState.roleId) return;
-    const updated = roles.filter(r => r.id !== deleteModalState.roleId);
-    setRoles(updated);
-    localStorage.setItem('quick_roles', JSON.stringify(updated));
+
+    try {
+      const res = await fetch(`/api/data/roles/${deleteModalState.roleId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setRoles(prev => prev.filter(r => r.id !== deleteModalState.roleId));
+      } else {
+        alert('删除失败');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('删除出错');
+    }
     setDeleteModalState({ isOpen: false, roleId: null });
   };
 
@@ -59,6 +77,24 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
   };
 
   const roleToDelete = roles.find(r => r.id === deleteModalState.roleId);
+
+  if (loading && roles.length === 0) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center">
+        <Loader2 className="w-8 h-8 text-medical-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center">
+        <AlertTriangle className="w-8 h-8 text-red-500 mb-2" />
+        <p className="text-slate-500">{error}</p>
+        <Button onClick={fetchRoles} variant="ghost" className="mt-4">重试</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -73,7 +109,7 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
             <p className="text-[10px] text-slate-400">选择陪练对象 (Doctor Persona)</p>
           </div>
         </div>
-        <button 
+        <button
           onClick={handleCreate}
           className="w-8 h-8 bg-medical-50 text-medical-600 rounded-full flex items-center justify-center border border-medical-100 shadow-sm active:scale-95 transition-all"
         >

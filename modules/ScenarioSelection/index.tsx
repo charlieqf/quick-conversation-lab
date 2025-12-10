@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ScenarioHeader } from './components/ScenarioHeader';
 import { ScenarioCard } from './components/ScenarioCard';
 import { Scenario, UserProfile } from '../../types';
-import { INITIAL_SCENARIOS } from '../../constants';
-import { FileText, RefreshCw, AlertTriangle } from 'lucide-react';
+import { FileText, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 
@@ -14,52 +13,64 @@ interface ScenarioSelectionModuleProps {
 
 export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = ({ userProfile, onNavigate }) => {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   // State for delete confirmation modal
-  const [deleteModalState, setDeleteModalState] = useState<{isOpen: boolean, scenarioId: string | null}>({
+  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean, scenarioId: string | null }>({
     isOpen: false,
     scenarioId: null
   });
 
-  // Load data (simulating persistence)
-  useEffect(() => {
-    const saved = localStorage.getItem('quick_scenarios');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setScenarios(parsed);
-      } catch (e) {
-        // Fallback if JSON is corrupt
-        setScenarios(INITIAL_SCENARIOS);
-      }
-    } else {
-      setScenarios(INITIAL_SCENARIOS);
-      localStorage.setItem('quick_scenarios', JSON.stringify(INITIAL_SCENARIOS));
+  const fetchScenarios = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/data/scenarios');
+      if (!res.ok) throw new Error('Failed to load scenarios');
+      const data = await res.json();
+      setScenarios(data);
+    } catch (err) {
+      setError('无法加载场景数据，请重试');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchScenarios();
   }, []);
 
   const handleCreateNew = () => {
-    onNavigate('editor');
+    onNavigate('editor'); // Editor will need to handle POST/PUT
   };
 
   const handleEdit = (id: string) => {
     onNavigate('editor', id);
   };
 
-  // Step 1: Trigger Modal
   const handleRequestDelete = (id: string) => {
     setDeleteModalState({ isOpen: true, scenarioId: id });
   };
 
-  // Step 2: Execute Delete
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteModalState.scenarioId) return;
-    
-    setScenarios((prevScenarios) => {
-      const updated = prevScenarios.filter(s => s.id !== deleteModalState.scenarioId);
-      localStorage.setItem('quick_scenarios', JSON.stringify(updated));
-      return updated;
-    });
-    
+
+    try {
+      const res = await fetch(`/api/data/scenarios/${deleteModalState.scenarioId}`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        setScenarios(prev => prev.filter(s => s.id !== deleteModalState.scenarioId));
+      } else {
+        alert('删除失败');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('删除出错');
+    }
+
     setDeleteModalState({ isOpen: false, scenarioId: null });
   };
 
@@ -67,15 +78,45 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
     onNavigate('roles', id);
   };
 
-  const handleResetDefaults = () => {
-    if (window.confirm('确定要恢复所有默认场景吗？这将覆盖您当前的操作。')) {
-      setScenarios(INITIAL_SCENARIOS);
-      localStorage.setItem('quick_scenarios', JSON.stringify(INITIAL_SCENARIOS));
+  const handleResetDefaults = async () => {
+    if (window.confirm('确定要恢复所有默认场景吗？这将覆盖您当前的操作并重置数据。')) {
+      try {
+        setLoading(true);
+        // Call backend seed with reset
+        const res = await fetch('/api/data/seed_defaults?reset=true', { method: 'POST' });
+        if (res.ok) {
+          fetchScenarios(); // Reload
+        } else {
+          alert('重置失败');
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
-  // Helper to get scenario title for the modal
   const scenarioToDelete = scenarios.find(s => s.id === deleteModalState.scenarioId);
+
+  if (loading && scenarios.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 text-medical-600 animate-spin" />
+        <span className="ml-3 text-slate-500">加载中...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] flex-col">
+        <AlertTriangle className="w-10 h-10 text-red-500 mb-2" />
+        <p className="text-slate-600">{error}</p>
+        <Button onClick={fetchScenarios} className="mt-4" variant="primary">重试</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full pb-20">
@@ -92,13 +133,13 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
               您已删除了所有场景。您可以创建新场景，或恢复系统默认的演示数据。
             </p>
             <div className="flex flex-col w-full max-w-[200px] gap-3">
-              <button 
+              <button
                 onClick={handleCreateNew}
                 className="bg-medical-600 text-white px-6 py-3 rounded-full text-sm font-semibold shadow-md shadow-medical-600/30 active:scale-95 transition-all"
               >
                 创建新场景
               </button>
-              <button 
+              <button
                 onClick={handleResetDefaults}
                 className="flex items-center justify-center text-slate-500 py-2 text-sm hover:text-medical-600 transition-colors"
               >
@@ -134,14 +175,14 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
         title="确认删除"
         footer={
           <>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => setDeleteModalState({ isOpen: false, scenarioId: null })}
             >
               取消
             </Button>
-            <Button 
-              variant="danger" 
+            <Button
+              variant="danger"
               onClick={handleConfirmDelete}
             >
               确认删除

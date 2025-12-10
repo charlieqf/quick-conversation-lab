@@ -10,7 +10,7 @@ interface RoleCardProps {
 }
 
 export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSelect }) => {
-  
+
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     onEdit(role.id);
@@ -23,12 +23,12 @@ export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSe
 
   // DiceBear Avatar URL (Using 9.x API) - Ghibli-esque style (adventurer)
   const diceBearUrl = `https://api.dicebear.com/9.x/adventurer/svg?seed=${role.avatarSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffdfbf,ffd5dc`;
-  
+
   // Prioritize generated avatar if available
   const avatarSrc = role.avatarImage || diceBearUrl;
 
   return (
-    <div 
+    <div
       onClick={() => onSelect(role.id)}
       className="bg-white rounded-xl p-4 mb-3 border border-slate-100 shadow-sm relative overflow-hidden active:bg-slate-50 transition-all cursor-pointer group"
     >
@@ -48,10 +48,10 @@ export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSe
               <p className="text-xs text-medical-600 font-medium mt-0.5 mb-2">{role.title}</p>
             </div>
           </div>
-          
+
           {/* Tags */}
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {role.focusAreas.slice(0, 3).map((tag, i) => (
+            {(role.focusAreas || (role as any).focus_areas || []).slice(0, 3).map((tag: string, i: number) => (
               <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-medium border border-slate-200">
                 {tag}
               </span>
@@ -60,32 +60,32 @@ export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSe
         </div>
       </div>
 
-       {/* Bottom Info & Action */}
-       <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50">
-          <div className="flex gap-2 text-[10px] text-slate-400 font-mono">
-            <span>Hostility: {role.hostility}%</span>
-            <span>Skepticism: {role.skepticism}%</span>
-          </div>
+      {/* Bottom Info & Action */}
+      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50">
+        <div className="flex gap-2 text-[10px] text-slate-400 font-mono">
+          <span>Hostility: {role.hostility}%</span>
+          <span>Skepticism: {role.skepticism}%</span>
+        </div>
 
-          <div className="flex items-center gap-1">
-             <button 
-                onClick={handleEdit}
-                className="p-2 text-slate-400 hover:text-medical-600 hover:bg-medical-50 rounded-full transition-colors"
-             >
-               <Edit2 className="w-3.5 h-3.5" />
-             </button>
-             <button 
-                onClick={handleDelete}
-                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-             >
-               <Trash2 className="w-3.5 h-3.5" />
-             </button>
-             <div className="w-px h-3 bg-slate-200 mx-1"></div>
-             <button className="text-xs font-bold text-medical-600 flex items-center pl-1">
-                开始 <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
-             </button>
-          </div>
-       </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleEdit}
+            className="p-2 text-slate-400 hover:text-medical-600 hover:bg-medical-50 rounded-full transition-colors"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleDelete}
+            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-3 bg-slate-200 mx-1"></div>
+          <button className="text-xs font-bold text-medical-600 flex items-center pl-1">
+            开始 <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
