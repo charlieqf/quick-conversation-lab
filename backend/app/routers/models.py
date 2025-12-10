@@ -1,7 +1,7 @@
 """
 Models API Router - List and get model capabilities
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from typing import List
 
 from app.adapters.base import ModelCapabilities
@@ -14,8 +14,9 @@ from ..registry import ADAPTERS
 
 
 @router.get("", response_model=List[dict])
-async def list_models():
+async def list_models(response: Response):
     """List all available voice models"""
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     models = []
     for adapter_id, adapter_cls in ADAPTERS.items():
         # Instantiate adapter to get capabilities

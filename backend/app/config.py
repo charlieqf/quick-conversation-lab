@@ -16,7 +16,12 @@ class Settings(BaseSettings):
     gcs_bucket_name: str = "voice-model-lab"
     
     # Server
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    cors_origins: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://quick-conversation-lab.web.app",
+        "https://quick-conversation-lab.firebaseapp.com"
+    ]
     debug: bool = True
     
     model_config = SettingsConfigDict(

@@ -1,7 +1,25 @@
 import React from 'react';
 import { Edit2, Trash2, ChevronRight } from 'lucide-react';
 import { Scenario } from '../../../types';
-import { THEME_CONFIG } from '../../../constants';
+
+
+const THEME_CONFIG: Record<string, { border: string; bg: string; badge: string }> = {
+  blue: {
+    border: 'border-blue-500',
+    bg: 'bg-blue-50',
+    badge: 'bg-blue-100 text-blue-700'
+  },
+  purple: {
+    border: 'border-purple-500',
+    bg: 'bg-purple-50',
+    badge: 'bg-purple-100 text-purple-700'
+  },
+  orange: {
+    border: 'border-orange-500',
+    bg: 'bg-orange-50',
+    badge: 'bg-orange-100 text-orange-700'
+  }
+};
 
 interface ScenarioCardProps {
   scenario: Scenario;

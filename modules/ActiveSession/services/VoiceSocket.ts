@@ -32,10 +32,17 @@ export class VoiceSocket {
                 this.url = `${protocol}//${host}/ws/${modelId}`;
             }
         } else {
-            // Default: Relative path (relies on Vite proxy or Firebase rewrites)
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = window.location.host;
-            this.url = `${protocol}//${host}/ws/${modelId}`;
+            // Default logic
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                this.url = `${protocol}//${host}/ws/${modelId}`;
+            } else {
+                // Production: Use direct Cloud Run URL to bypass Firebase Hosting Proxy (which strips Upgrade headers)
+                // This corresponds to voice-model-lab-backend in asia-northeast1
+                const CLOUD_RUN_HOST = "voice-model-lab-backend-1067995682638.asia-northeast1.run.app";
+                this.url = `wss://${CLOUD_RUN_HOST}/ws/${modelId}`;
+            }
         }
 
         this.logCallback = onLog;

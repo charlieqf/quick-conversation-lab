@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Optional
 
 from app.adapters.base import SessionConfig, AudioConfig, VoiceConfig, AdapterStatus
+from app.config import settings
 from ..registry import ADAPTERS
 
 router = APIRouter()
@@ -30,12 +31,17 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     await websocket.accept()
     
     # DEBUG LOGGING
+    # DEBUG LOGGING
     print(f"WS Connect: Model={model_id}")
     try:
-        key_status = "present" if settings.gemini_api_key else "MISSING"
-        print(f"WS Config: GeminiKey={key_status} (Len={len(settings.gemini_api_key)})")
-    except:
-        print("WS Config: Error checking key")
+        # Check settings directly
+        has_gemini = bool(settings.gemini_api_key)
+        has_openai = bool(settings.openai_api_key)
+        print(f"WS Config: Keys - Gemini={'Yes' if has_gemini else 'No'}, OpenAI={'Yes' if has_openai else 'No'}")
+    except Exception as e:
+        print(f"WS Config Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
     # Validate model
     if model_id not in ADAPTERS:
@@ -96,17 +102,18 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     
     async def handle_error_async(code: int, message: str):
         try:
-            await websocket.send_json({
-                "type": "error",
-                "timestamp": int(time.time() * 1000),
-                "payload": {
-                    "code": code,
-                    "message": message
-                }
-            })
-            # Use standard WS codes: 1008 (Policy Violation) for user errors, 1011 (Internal Error) for others
-            ws_close_code = 1008 if code < 4100 else 1011
-            await websocket.close(code=ws_close_code)
+            if websocket.client_state.name == "CONNECTED":
+                await websocket.send_json({
+                    "type": "error",
+                    "timestamp": int(time.time() * 1000),
+                    "payload": {
+                        "code": code,
+                        "message": message
+                    }
+                })
+                # Use standard WS codes: 1008 (Policy Violation) for user errors, 1011 (Internal Error) for others
+                ws_close_code = 1008 if code < 4100 else 1011
+                await websocket.close(code=ws_close_code)
         except Exception:
             # If sending fails (e.g. socket already closed), just ensure we cleanup
             pass
@@ -139,6 +146,9 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                 
                 # Create session
                 session_id = f"sess-{int(time.time() * 1000)}"
+                
+                # Log incoming parameters
+                print(f"WS Create Session: Payload={json.dumps(payload)}")
                 
                 # Get model capabilities
                 cap = adapter.capabilities
@@ -185,12 +195,15 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                     max_duration=payload.get("session", {}).get("maxDuration", 600)
                 )
                 
+                print(f"WS Info: Connecting adapter {model_id}...")
                 await adapter.connect(config)
+                print(f"WS Info: Adapter status: {adapter.status}")
                 
                 # FIX: Check if connection actually succeeded using Enum
                 if adapter.status != AdapterStatus.CONNECTED:
                     # Error is already emitted by adapter via on_error callback if connect failed
                     # But we ensure we return if status is not connected
+                    print(f"WS Error: Connection failed for {model_id}")
                     if websocket.client_state.name == "CONNECTED": # Check if WS still open
                          await websocket.close(code=4001)
                     return
@@ -284,14 +297,21 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
             }
         })
     except Exception as e:
-        await websocket.send_json({
-            "type": "error",
-            "timestamp": int(time.time() * 1000),
-            "payload": {
-                "code": 4100,
-                "message": str(e)
-            }
-        })
+        print(f"WS Critical Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        try:
+            if websocket.client_state.name == "CONNECTED":
+                await websocket.send_json({
+                    "type": "error",
+                    "timestamp": int(time.time() * 1000),
+                    "payload": {
+                        "code": 4100,
+                        "message": str(e)
+                    }
+                })
+        except Exception:
+            pass
     finally:
         # Cleanup
         await adapter.disconnect()

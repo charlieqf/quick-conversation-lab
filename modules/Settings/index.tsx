@@ -3,7 +3,12 @@ import { ConnectionStatus } from './components/ConnectionStatus';
 import { ModelSelector } from './components/ModelSelector';
 import { VoiceSelector } from './components/VoiceSelector';
 import { UserSettings, APIModel, APIVoice } from '../../types';
-import { DEFAULT_SETTINGS } from '../../constants';
+const DEFAULT_SETTINGS: UserSettings = {
+  apiKeyConfigured: false,
+  apiReady: false,
+  selectedModel: 'gemini',
+  selectedVoice: 'Kore'
+};
 
 export const SettingsModule: React.FC = () => {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
