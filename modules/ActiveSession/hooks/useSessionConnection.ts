@@ -130,7 +130,23 @@ Do not break character. Speak Chinese.
     log(`Context Loaded: ${role.nameCN} in ${scenario.subtitle}`, 'info');
 
     try {
-      // 1. Init Streamer
+      // 1. Load User Settings (Model & Voice)
+      const settingsStr = localStorage.getItem('quick_settings');
+      let userSettings = { selectedModel: 'gemini', selectedVoice: 'Kore' };
+      if (settingsStr) {
+        try {
+          const parsed = JSON.parse(settingsStr);
+          // Simple validation/fallback
+          if (parsed.selectedModel) userSettings.selectedModel = parsed.selectedModel;
+          if (parsed.selectedVoice) userSettings.selectedVoice = parsed.selectedVoice;
+        } catch (e) {
+          log('Failed to parse user settings, using defaults', 'error');
+        }
+      }
+
+      log(`Connecting with Model: ${userSettings.selectedModel}, Voice: ${userSettings.selectedVoice}`, 'info');
+
+      // 2. Init Streamer
       const streamer = new AudioStreamer(
         (pcmFloat32) => {
           // On Microphone Data
@@ -159,12 +175,9 @@ Do not break character. Speak Chinese.
       streamerRef.current = streamer;
       await streamer.start(config.sampleRate);
 
-      // 2. Init Socket
-      // API Key is now handled by backend
-      // const apiKey = process.env.API_KEY || ''; 
-
+      // 3. Init Socket
       const socket = new VoiceSocket(
-        "gemini", // Hardcoded model ID for now, should come from selection
+        userSettings.selectedModel,
         (msg, type) => log(msg, type),
         (b64) => playAudioChunk(b64),
         (role, text) => {
@@ -201,13 +214,31 @@ Do not break character. Speak Chinese.
           }
         },
         (err) => {
+          // Cleanup resources but keep error status
+          if (streamerRef.current) streamerRef.current.stop();
+          if (socketRef.current) {
+            // socket.disconnect() is redundant if socket closed itself, but safe
+            socketRef.current.disconnect();
+          }
+          socketRef.current = null;
           setStatus('error');
           log(`Socket Error: ${err}`, 'error');
         }
       );
 
       socketRef.current = socket;
-      socket.connect(config, systemInstruction);
+
+      // Inject voiceId and structure audio config
+      const connectConfig = {
+        ...config,
+        voiceId: userSettings.selectedVoice,
+        audio: {
+          sampleRate: config.sampleRate,
+          encoding: 'pcm_s16le',
+          channels: 1
+        }
+      };
+      socket.connect(connectConfig, systemInstruction);
 
       setStatus('connected');
 

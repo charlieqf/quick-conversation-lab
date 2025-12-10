@@ -9,20 +9,17 @@ from app.adapters.gemini import GeminiAdapter
 
 router = APIRouter()
 
-# Registry of available adapters
-ADAPTERS = {
-    "gemini": GeminiAdapter(),
-    # Add more adapters here as they are implemented
-    # "openai": OpenAIAdapter(),
-    # "doubao": DoubaoAdapter(),
-}
+# Registry from common module
+from ..registry import ADAPTERS
 
 
 @router.get("", response_model=List[dict])
 async def list_models():
     """List all available voice models"""
     models = []
-    for adapter_id, adapter in ADAPTERS.items():
+    for adapter_id, adapter_cls in ADAPTERS.items():
+        # Instantiate adapter to get capabilities
+        adapter = adapter_cls()
         cap = adapter.capabilities
         models.append({
             "id": cap.id,
@@ -41,7 +38,8 @@ async def get_model(model_id: str):
     if model_id not in ADAPTERS:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
     
-    adapter = ADAPTERS[model_id]
+    adapter_cls = ADAPTERS[model_id]
+    adapter = adapter_cls()
     cap = adapter.capabilities
     
     return {
@@ -67,5 +65,6 @@ async def get_model_voices(model_id: str):
     if model_id not in ADAPTERS:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
     
-    adapter = ADAPTERS[model_id]
+    adapter_cls = ADAPTERS[model_id]
+    adapter = adapter_cls()
     return adapter.capabilities.available_voices

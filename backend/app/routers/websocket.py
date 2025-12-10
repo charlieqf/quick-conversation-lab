@@ -8,15 +8,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Optional
 
 from app.adapters.base import SessionConfig, AudioConfig, VoiceConfig, AdapterStatus
-from app.adapters.gemini import GeminiAdapter
+from ..registry import ADAPTERS
 
 router = APIRouter()
-
-# Registry of available adapters
-ADAPTERS = {
-    "gemini": GeminiAdapter,
-    # Add more adapters here
-}
 
 
 @router.websocket("/ws/{model_id}")

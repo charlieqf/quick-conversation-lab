@@ -1,64 +1,74 @@
 import React from 'react';
-import { Zap, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
-import { Button } from '../../../components/ui/Button';
+import { APIModel } from '../../../types';
+import { Server, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface ConnectionStatusProps {
-  isConnected: boolean;
-  onConnect: () => void;
+  models: APIModel[];
+  isLoading?: boolean;
 }
 
-export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isConnected, onConnect }) => {
+export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ models, isLoading }) => {
+  const backendConnected = models.length > 0;
+  const activeModels = models.filter(m => m.isEnabled).length;
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-2">
-          <div className={`p-1.5 rounded-full ${isConnected ? 'bg-green-100' : 'bg-slate-100'}`}>
-            <Zap className={`w-4 h-4 ${isConnected ? 'text-green-600 fill-current' : 'text-slate-400'}`} />
-          </div>
-          <h3 className="font-bold text-slate-800 text-sm">连接状态</h3>
-        </div>
-        <div className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isConnected ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-          {isConnected ? (
-            <>
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>已连接</span>
-            </>
-          ) : (
-            <>
-              <AlertCircle className="w-3.5 h-3.5" />
-              <span>未配置</span>
-            </>
-          )}
+    <div className="mb-6 bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <Server className="w-4 h-4 text-slate-500" />
+          System Status
+        </h3>
+        <div className={`
+          flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium
+          ${backendConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}
+        `}>
+          <span className={`w-1.5 h-1.5 rounded-full ${backendConnected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          {backendConnected ? 'Backend Online' : 'Backend Offline'}
         </div>
       </div>
 
-      <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-        本应用使用 Wanyi API 进行驱动。
-        {isConnected 
-          ? ' API Key 已就绪，您可以正常使用所有 AI 功能。' 
-          : ' 请连接您的 Google Cloud Project 以启用 AI 场景生成与对话功能。'}
-      </p>
+      <div className="space-y-3">
+        {isLoading ? (
+          <div className="text-xs text-slate-400 animate-pulse">Checking services...</div>
+        ) : !backendConnected ? (
+          <div className="text-xs text-rose-500 bg-rose-50 p-2 rounded">
+            Cannot connect to Backend API. Is it running?
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+            {models.map(model => (
+              <div key={model.id} className={`
+                        flex items-center justify-between p-2 rounded border text-xs
+                        ${model.isEnabled ? 'bg-slate-50 border-slate-100' : 'bg-slate-50 border-slate-100 opacity-60'}
+                    `}>
+                <div className="flex flex-col">
+                  <span className="font-medium text-slate-700">{model.name}</span>
+                  <span className="text-[10px] text-slate-400">{model.provider}</span>
+                </div>
 
-      {!isConnected && (
-        <Button 
-          variant="primary" 
-          onClick={onConnect} 
-          className="w-full justify-center bg-medical-600 hover:bg-medical-700"
-          icon={<ExternalLink className="w-4 h-4" />}
-        >
-          连接 Google AI Studio
-        </Button>
-      )}
-      
-      {isConnected && (
-        <div className="bg-slate-50 rounded px-3 py-2 text-xs font-mono text-slate-500 border border-slate-100 flex justify-between items-center">
-          <span>API Key Configured</span>
-          <span className="text-green-600 text-[10px] flex items-center">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5"></span>
-            Active
-          </span>
-        </div>
-      )}
+                {model.isEnabled ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <div className="group relative">
+                    <AlertCircle className="w-4 h-4 text-amber-400 cursor-help" />
+                    <div className="absolute bottom-full right-0 mb-2 w-max px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                      Missing API Key
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {backendConnected && (
+          <div className="mt-2 pt-2 border-t border-slate-50 flex justify-between items-center">
+            <span className="text-[10px] text-slate-400">
+              Active Adapters: {activeModels} / {models.length}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

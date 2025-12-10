@@ -31,7 +31,7 @@ export interface Scenario {
   theme: ThemeColor;
   lastUpdated: string;
   author?: string;
-  
+
   // Extended fields for persistence
   scriptContent?: string;
   workflow?: string; // Changed to string for full text description
@@ -55,13 +55,13 @@ export interface Role {
   avatarImage?: string; // Base64 Data URL for generated realistic avatar
   focusAreas: string[]; // e.g. "副作用", "费用"
   description: string; // Natural language description
-  
+
   // Personality Dimensions (0-100)
   // 0 = Left extreme, 100 = Right extreme
   hostility: number; // 0 (Hostile) <-> 100 (Friendly)
   verbosity: number; // 0 (Brief) <-> 100 (Verbose)
   skepticism: number; // 0 (Gullible) <-> 100 (Skeptic)
-  
+
   systemPromptAddon: string; // The generated instruction
   lastUpdated: string;
 }
@@ -96,16 +96,37 @@ export interface SessionReportData {
 
 // --- Settings Types ---
 
-export type AIModelId = 'gemini-2.5-flash' | 'gemini-3-pro-preview';
+export type AIModelId = string;
+
+export interface APIModel {
+  id: string;
+  name: string;
+  provider: string;
+  isEnabled: boolean;
+  defaultVoice: string;
+  supportsTranscription: boolean;
+  // UI helper fields
+  badge?: string;
+  description?: string;
+}
 
 export interface ModelConfig {
-  id: AIModelId;
+  id: string;
   name: string;
-  badge: string; // e.g. "Fast", "Smart"
+  badge: string;
   description: string;
 }
 
-export type VoiceId = 'Zephyr' | 'Fenrir' | 'Kore' | 'Puck' | 'Charon';
+export type VoiceId = string;
+
+export interface APIVoice {
+  id: string;
+  name: string;
+  gender: 'Male' | 'Female';
+  // UI helper fields
+  style?: string;
+  icon?: string;
+}
 
 export interface VoiceConfig {
   id: VoiceId;
@@ -116,7 +137,8 @@ export interface VoiceConfig {
 }
 
 export interface UserSettings {
-  apiKeyConfigured: boolean; // Just a flag for UI state
+  apiKeyConfigured: boolean; // Flag for UI state (legacy/client-side)
+  apiReady: boolean; // Flag for Backend connection status
   selectedModel: AIModelId;
   selectedVoice: VoiceId;
 }
@@ -165,7 +187,7 @@ export interface ChatMessage {
   role: 'user' | 'model' | 'system';
   type: 'text' | 'feedback'; // feedback is for tool outputs
   content: string;
-  
+
   // For feedback types
   scoreDelta?: number;
   reason?: string;

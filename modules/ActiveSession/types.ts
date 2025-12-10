@@ -5,6 +5,7 @@ export interface SessionConfig {
   sampleRate: 16000 | 24000;
   bufferThreshold: number; // How many chunks before sending (ms approx)
   volumeThreshold: number; // VAD visual threshold
+  voiceId?: string; // Selected voice ID
 }
 
 export interface StreamMetrics {

@@ -70,12 +70,12 @@ export class VoiceSocket {
                     maxDuration: 600
                 },
                 audio: {
-                    sampleRate: 24000, // Enforce 24k as per backend requirement
-                    encoding: "pcm_s16le",
-                    channels: 1
+                    sampleRate: config.audio?.sampleRate || 24000,
+                    encoding: config.audio?.encoding || "pcm_s16le",
+                    channels: config.audio?.channels || 1
                 },
                 voice: {
-                    voiceId: config.voiceId || "Kore", // Default to Kore if not set
+                    voiceId: config.voiceId || "Kore",
                     language: "zh-CN"
                 }
             }
@@ -146,7 +146,8 @@ export class VoiceSocket {
 
             case 'error':
                 this.logCallback(`Server Error: ${payload.code} ${payload.message}`, 'error');
-                this.onErrorCallback(new Error(payload.message));
+                this.onErrorCallback(new Error(`[${payload.code}] ${payload.message}`));
+                this.disconnect(); // Force disconnect on critical error
                 break;
 
             case 'warning':

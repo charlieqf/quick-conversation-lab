@@ -45,7 +45,8 @@ export const AVAILABLE_VOICES: VoiceConfig[] = [
 
 export const DEFAULT_SETTINGS: UserSettings = {
   apiKeyConfigured: false,
-  selectedModel: 'gemini-2.5-flash',
+  apiReady: false,
+  selectedModel: 'gemini',
   selectedVoice: 'Kore'
 };
 
@@ -86,7 +87,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     title: 'EndometriosisManagement_DydrogesteroneVsDienogest',
     subtitle: '子宫内膜异位症保守治疗：达芙通与唯散宁方案比较',
     description: '针对保守治疗的子宫内膜异位症患者，比较达芙通与唯散宁在疼痛缓解、月经规律性、生长发育及不规则出血方面的优势，指导医生优化用药选择。',
-    tags: ["Endometriosis","Dysmenorrhea","Dydrogesterone","Dienogest","Conservative Treatment","Patient Education","Adverse Reactions","HPO Axis","Bone Density","Fertility Preservation","Drug Comparison","妇科","痛经","子宫内膜异位症","达芙通","唯散宁"],
+    tags: ["Endometriosis", "Dysmenorrhea", "Dydrogesterone", "Dienogest", "Conservative Treatment", "Patient Education", "Adverse Reactions", "HPO Axis", "Bone Density", "Fertility Preservation", "Drug Comparison", "妇科", "痛经", "子宫内膜异位症", "达芙通", "唯散宁"],
     theme: 'purple',
     lastUpdated: '2025-12-08T07:44:38.775Z',
     workflow: `你将扮演一名资深妇科主任医师陈医生，正在进行一次日常门诊。一位医药代表正在拜访你。
@@ -266,6 +267,6 @@ export const INITIAL_SCENARIOS: Scenario[] = [
 *   **扣分项**：知识点错误、混淆或不清晰；无法有效回答客户提出的专业问题。
 
 **评分说明**：0（未展现）；1分-5分（学习阶段）；6分-8分（应用阶段）；9分-10分（精通阶段）。`,
-    scoringDimensions: [{"id":"dim-1","label":"Opening the Call","weight":1,"description":"Effectively establishes rapport, clarifies visit purpose, and gains customer agreement for the discussion."},{"id":"dim-2","label":"Patient Case Discussion","weight":1,"description":"Presents a clear, concise, and relevant patient case that highlights key symptoms and resonates with the doctor's practice."},{"id":"dim-3","label":"Probing & Active Listening","weight":2,"description":"Uses logical questioning (funneling) and deep listening to understand the doctor's current treatment habits, needs, and feedback."},{"id":"dim-4","label":"Solution Presentation","weight":2,"description":"Tailors product benefits to customer needs, effectively contrasts with competitors, and uses visual aids to persuade."},{"id":"dim-5","label":"Call Closing & Commitment","weight":2,"description":"Summarizes core discussion, secures commitment from the doctor, highlights brand value, and outlines follow-up plans."},{"id":"dim-6","label":"Managing Feedback","weight":1,"description":"Effectively identifies, understands, and addresses various forms of negative feedback, objections, or misunderstandings."},{"id":"dim-7","label":"Product & Disease Knowledge","weight":1,"description":"Demonstrates comprehensive knowledge of company products, the competitive landscape, and relevant disease areas and treatments."}],
+    scoringDimensions: [{ "id": "dim-1", "label": "Opening the Call", "weight": 1, "description": "Effectively establishes rapport, clarifies visit purpose, and gains customer agreement for the discussion." }, { "id": "dim-2", "label": "Patient Case Discussion", "weight": 1, "description": "Presents a clear, concise, and relevant patient case that highlights key symptoms and resonates with the doctor's practice." }, { "id": "dim-3", "label": "Probing & Active Listening", "weight": 2, "description": "Uses logical questioning (funneling) and deep listening to understand the doctor's current treatment habits, needs, and feedback." }, { "id": "dim-4", "label": "Solution Presentation", "weight": 2, "description": "Tailors product benefits to customer needs, effectively contrasts with competitors, and uses visual aids to persuade." }, { "id": "dim-5", "label": "Call Closing & Commitment", "weight": 2, "description": "Summarizes core discussion, secures commitment from the doctor, highlights brand value, and outlines follow-up plans." }, { "id": "dim-6", "label": "Managing Feedback", "weight": 1, "description": "Effectively identifies, understands, and addresses various forms of negative feedback, objections, or misunderstandings." }, { "id": "dim-7", "label": "Product & Disease Knowledge", "weight": 1, "description": "Demonstrates comprehensive knowledge of company products, the competitive landscape, and relevant disease areas and treatments." }],
   }
 ];
