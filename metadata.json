@@ -1,0 +1,7 @@
+{
+  "name": "Quick Coach V2.2",
+  "description": "A modular, medical-grade scenario training application featuring a serious, exquisite UI style for professional medical simulation.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
