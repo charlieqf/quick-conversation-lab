@@ -3,8 +3,8 @@ import { SessionConfig } from "./types";
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   sampleRate: 24000, // Gemini Native
-  bufferThreshold: 3, // ~100ms buffering
-  volumeThreshold: 10 
+  bufferThreshold: 15, // ~100ms buffering (was 3)
+  volumeThreshold: 10
 };
 
 // PCM16 Linear, 1 channel

@@ -29,8 +29,17 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     """
     await websocket.accept()
     
+    # DEBUG LOGGING
+    print(f"WS Connect: Model={model_id}")
+    try:
+        key_status = "present" if settings.gemini_api_key else "MISSING"
+        print(f"WS Config: GeminiKey={key_status} (Len={len(settings.gemini_api_key)})")
+    except:
+        print("WS Config: Error checking key")
+
     # Validate model
     if model_id not in ADAPTERS:
+        print(f"WS Error: Model {model_id} not found")
         await websocket.send_json({
             "type": "error",
             "timestamp": int(time.time() * 1000),

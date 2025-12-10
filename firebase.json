@@ -11,14 +11,14 @@
                 "source": "/api/**",
                 "run": {
                     "serviceId": "voice-model-lab-backend",
-                    "region": "us-central1"
+                    "region": "asia-northeast1"
                 }
             },
             {
                 "source": "/ws/**",
                 "run": {
                     "serviceId": "voice-model-lab-backend",
-                    "region": "us-central1"
+                    "region": "asia-northeast1"
                 }
             },
             {

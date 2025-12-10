@@ -16,10 +16,27 @@ export class VoiceSocket {
         onError: (err: any) => void
     ) {
         // Protocol mapping: wss://{host}/ws/{model_id}
-        // Using relative path to rely on Vite proxy
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        this.url = `${protocol}//${host}/ws/${modelId}`;
+        const apiOverride = localStorage.getItem('VITE_API_BASE_URL');
+
+        if (apiOverride) {
+            try {
+                // Parse override URL to get host
+                const urlObj = new URL(apiOverride);
+                const protocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.url = `${protocol}//${urlObj.host}/ws/${modelId}`;
+                console.log(`[VoiceSocket] Using override URL: ${this.url}`);
+            } catch (e) {
+                console.error("[VoiceSocket] Invalid override URL, falling back to relative.", e);
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                this.url = `${protocol}//${host}/ws/${modelId}`;
+            }
+        } else {
+            // Default: Relative path (relies on Vite proxy or Firebase rewrites)
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            this.url = `${protocol}//${host}/ws/${modelId}`;
+        }
 
         this.logCallback = onLog;
         this.onAudioCallback = onAudio;

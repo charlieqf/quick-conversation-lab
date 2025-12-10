@@ -3,7 +3,7 @@
 # Deploys Backend to Cloud Run and Frontend to Firebase Hosting
 
 $PROJECT_ID = "quick-conversation-lab"
-$REGION = "us-central1"
+$REGION = "asia-northeast1"
 $SERVICE_NAME = "voice-model-lab-backend"
 
 Write-Host "==========================================" -ForegroundColor Cyan
