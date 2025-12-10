@@ -57,14 +57,27 @@ async def debug_config():
     except Exception as e:
         conn_result = f"Failed to connect to {host}: {e}"
 
+    openai_key = os.getenv("OPENAI_API_KEY")
+    try:
+        # Simple DNS check for openai
+        socket.gethostbyname("api.openai.com")
+        openai_conn = "DNS Resolved"
+    except:
+        openai_conn = "DNS Failed"
+
     return {
         "env_vars": {
             "GEMINI_API_KEY_LEN": len(key) if key else 0,
             "GEMINI_API_KEY_PREFIX": key[:4] if key else "None",
+            "OPENAI_API_KEY_LEN": len(openai_key) if openai_key else 0,
+            "OPENAI_API_KEY_PREFIX": openai_key[:7] if openai_key else "None",
             "GCP_PROJECT": os.getenv("GCP_PROJECT_ID", "Not Set"),
             "Is_Cloud_Run": os.getenv("K_SERVICE") is not None
         },
-        "connectivity": conn_result
+        "connectivity": {
+             "google": conn_result,
+             "openai": openai_conn
+        }
     }
 
 

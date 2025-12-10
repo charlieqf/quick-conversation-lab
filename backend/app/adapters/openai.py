@@ -1,9 +1,19 @@
-from typing import Optional
 import os
+import json
+import asyncio
+import base64
+import websockets
+from typing import Optional
 from .base import BaseModelAdapter, ModelCapabilities, AdapterStatus, SessionConfig
 
 class OpenAIAdapter(BaseModelAdapter):
-    """Adapter for OpenAI Realtime API (GPT-4o Audio)"""
+    """Adapter for OpenAI Realtime API (GPT-4o Audio) using WebSockets"""
+    
+    def __init__(self):
+        super().__init__()
+        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self._receive_task: Optional[asyncio.Task] = None
+        self._session_id: Optional[str] = None
     
     @property
     def id(self) -> str:
@@ -45,22 +55,130 @@ class OpenAIAdapter(BaseModelAdapter):
         )
 
     async def connect(self, config: SessionConfig) -> None:
-        if not self.capabilities.is_enabled:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
             self._status = AdapterStatus.ERROR
             self._emit_error(4001, "OpenAI API key not configured")
             return
         
-        # Skeleton connection simulation
-        self._status = AdapterStatus.CONNECTING
-        # Simulate async connection
-        import asyncio
-        await asyncio.sleep(0.5) 
-        self._status = AdapterStatus.CONNECTED
-        # In real impl, we would start websocket here
-        
+        url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "OpenAI-Beta": "realtime=v1"
+        }
+
+        try:
+            self._status = AdapterStatus.CONNECTING
+            self._ws = await websockets.connect(url, extra_headers=headers)
+            self._status = AdapterStatus.CONNECTED
+            
+            # Start receive loop
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            
+            # Configure Session
+            await self._send_session_update(config)
+            
+        except Exception as e:
+            self._status = AdapterStatus.ERROR
+            self._emit_error(4002, f"Failed to connect to OpenAI: {str(e)}")
+            await self.disconnect()
+
+    async def _send_session_update(self, config: SessionConfig):
+        if not self._ws: return
+
+        session_update = {
+            "type": "session.update",
+            "session": {
+                "voice": config.voice.voice_id,
+                "instructions": config.system_instruction,
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "input_audio_transcription": {
+                    "model": "whisper-1"
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500
+                }
+            }
+        }
+        await self._ws.send(json.dumps(session_update))
+
     async def disconnect(self) -> None:
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+            
+        if self._ws:
+            try:
+                await self._ws.close()
+            except:
+                pass
+            self._ws = None
+            
         self._status = AdapterStatus.DISCONNECTED
 
     async def send_audio(self, audio_base64: str, sequence: int) -> None:
-        # In skeleton, just log or ignore
-        pass
+        if not self._ws or self._status != AdapterStatus.CONNECTED:
+            return
+
+        # Send audio append event
+        msg = {
+            "type": "input_audio_buffer.append",
+            "audio": audio_base64
+        }
+        try:
+            await self._ws.send(json.dumps(msg))
+        except Exception as e:
+            print(f"Error sending audio: {e}")
+
+    async def _receive_loop(self):
+        try:
+            async for message in self._ws:
+                data = json.loads(message)
+                event_type = data.get("type")
+                
+                if event_type == "session.created":
+                    self._session_id = data.get("session", {}).get("id")
+                    
+                elif event_type == "response.audio.delta":
+                    # Audio output
+                    b64_audio = data.get("delta", "")
+                    if b64_audio:
+                        self._emit_audio(b64_audio, 0) # Sequence not strictly tracked by OpenAI protocol
+                        
+                elif event_type == "response.audio_transcript.delta":
+                    # Model transcript (streaming)
+                    text = data.get("delta", "")
+                    if text:
+                        self._emit_transcription("model", text, is_final=False)
+
+                elif event_type == "conversation.item.input_audio_transcription.completed":
+                    # User transcript (final)
+                    text = data.get("transcript", "")
+                    if text:
+                        self._emit_transcription("user", text, is_final=True)
+                        
+                elif event_type == "response.output_item.done":
+                    # Check if it was a message response
+                    item = data.get("item", {})
+                    if item.get("type") == "message":
+                        # Mark model turn as potentially done?
+                        pass
+
+                elif event_type == "error":
+                    err = data.get("error", {})
+                    self._emit_error(4003, f"OpenAI Error: {err.get('message')}")
+
+        except websockets.ConnectionClosed:
+            if self._status == AdapterStatus.CONNECTED:
+                self._status = AdapterStatus.DISCONNECTED
+                # self._emit_error(1000, "Connection closed by server")
+        except Exception as e:
+            print(f"OpenAI Receive Loop Error: {e}")
