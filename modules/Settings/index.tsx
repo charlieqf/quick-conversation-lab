@@ -29,7 +29,7 @@ export const SettingsModule: React.FC = () => {
 
       // Fetch Models
       try {
-        const res = await fetch('/api/models'); // Uses proxy
+        const res = await fetch('/api/models', { cache: 'no-store' }); // Uses proxy
         if (!res.ok) throw new Error('Failed to load models');
         const data: APIModel[] = await res.json();
         setModels(data);
