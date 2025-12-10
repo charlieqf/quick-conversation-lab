@@ -4,7 +4,7 @@ import { SessionConfig, ConnectionState } from '../types';
 import { LogEntry, Scenario, Role, SessionReportData, ChatMessage } from '../../../types';
 import { DEFAULT_SESSION_CONFIG } from '../constants';
 import { AudioStreamer } from '../services/AudioStreamer';
-import { GeminiSocket } from '../services/GeminiSocket';
+import { VoiceSocket } from '../services/VoiceSocket';
 
 // Helpers
 const float32ToInt16 = (float32: Float32Array) => {
@@ -28,21 +28,25 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
 
 export const useSessionConnection = (scenarioId: string, roleId: string) => {
   const [status, setStatus] = useState<ConnectionState>('disconnected');
-  const [config, setConfig] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG);
+  // Initialize with 24000 Hz for Gemini
+  const [config, setConfig] = useState<SessionConfig>({
+    ...DEFAULT_SESSION_CONFIG,
+    sampleRate: 24000
+  });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [volume, setVolume] = useState(0);
 
   // Session Data
   const startTimeRef = useRef<number>(0);
   const sessionDataRef = useRef<{ id: string }>({ id: Date.now().toString() });
-  
+
   // Transcription Storage
   const transcriptHistoryRef = useRef<ChatMessage[]>([]);
   const currentTurnRef = useRef<{ user: string, model: string }>({ user: '', model: '' });
 
   // Refs
   const streamerRef = useRef<AudioStreamer | null>(null);
-  const socketRef = useRef<GeminiSocket | null>(null);
+  const socketRef = useRef<VoiceSocket | null>(null);
   const audioBufferQueue = useRef<Int16Array[]>([]);
   const nextPlayTime = useRef<number>(0);
 
@@ -92,7 +96,7 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   // Connect Logic
   const connect = async () => {
     if (status === 'connected' || status === 'connecting') return;
-    
+
     setStatus('connecting');
     log('Initializing Session...', 'info');
     startTimeRef.current = Date.now();
@@ -124,30 +128,30 @@ Do not break character. Speak Chinese.
     `.trim();
 
     log(`Context Loaded: ${role.nameCN} in ${scenario.subtitle}`, 'info');
-    
+
     try {
       // 1. Init Streamer
       const streamer = new AudioStreamer(
         (pcmFloat32) => {
-           // On Microphone Data
-           const int16 = float32ToInt16(pcmFloat32);
-           
-           audioBufferQueue.current.push(int16);
-           
-           if (audioBufferQueue.current.length >= config.bufferThreshold) {
-             if (socketRef.current) {
-               const totalLen = audioBufferQueue.current.reduce((acc, b) => acc + b.length, 0);
-               const merged = new Int16Array(totalLen);
-               let offset = 0;
-               for (const b of audioBufferQueue.current) {
-                 merged.set(b, offset);
-                 offset += b.length;
-               }
-               const b64 = arrayBufferToBase64(merged.buffer);
-               socketRef.current.sendAudioChunk(b64);
-             }
-             audioBufferQueue.current = [];
-           }
+          // On Microphone Data
+          const int16 = float32ToInt16(pcmFloat32);
+
+          audioBufferQueue.current.push(int16);
+
+          if (audioBufferQueue.current.length >= config.bufferThreshold) {
+            if (socketRef.current) {
+              const totalLen = audioBufferQueue.current.reduce((acc, b) => acc + b.length, 0);
+              const merged = new Int16Array(totalLen);
+              let offset = 0;
+              for (const b of audioBufferQueue.current) {
+                merged.set(b, offset);
+                offset += b.length;
+              }
+              const b64 = arrayBufferToBase64(merged.buffer);
+              socketRef.current.sendAudioChunk(b64);
+            }
+            audioBufferQueue.current = [];
+          }
         },
         (msg, type) => log(msg, type as any)
       );
@@ -156,58 +160,57 @@ Do not break character. Speak Chinese.
       await streamer.start(config.sampleRate);
 
       // 2. Init Socket
-      const apiKey = process.env.API_KEY || '';
-      if (!apiKey) throw new Error("No API Key configured in Settings.");
+      // API Key is now handled by backend
+      // const apiKey = process.env.API_KEY || ''; 
 
-      const socket = new GeminiSocket(
-        "gemini-2.5-flash-native-audio-preview-09-2025",
-        apiKey,
+      const socket = new VoiceSocket(
+        "gemini", // Hardcoded model ID for now, should come from selection
         (msg, type) => log(msg, type),
         (b64) => playAudioChunk(b64),
         (role, text) => {
-             if (role === 'system' && text === 'TURN_COMPLETE') {
-                 // Flush accumulated text to history
-                 const { user, model } = currentTurnRef.current;
-                 const now = Date.now();
-                 
-                 if (user.trim()) {
-                     transcriptHistoryRef.current.push({
-                         id: `${now}_u`,
-                         role: 'user',
-                         type: 'text',
-                         content: user.trim()
-                     });
-                     log(`Transcript [User]: ${user.substring(0, 30)}...`, 'info');
-                 }
-                 
-                 if (model.trim()) {
-                     transcriptHistoryRef.current.push({
-                         id: `${now}_m`,
-                         role: 'model',
-                         type: 'text',
-                         content: model.trim()
-                     });
-                     log(`Transcript [Model]: ${model.substring(0, 30)}...`, 'info');
-                 }
-                 
-                 currentTurnRef.current = { user: '', model: '' };
-             } else if (role === 'user') {
-                 currentTurnRef.current.user += text;
-             } else if (role === 'model') {
-                 currentTurnRef.current.model += text;
-             }
+          if (role === 'system' && text === 'TURN_COMPLETE') {
+            // Flush accumulated text to history
+            const { user, model } = currentTurnRef.current;
+            const now = Date.now();
+
+            if (user.trim()) {
+              transcriptHistoryRef.current.push({
+                id: `${now}_u`,
+                role: 'user',
+                type: 'text',
+                content: user.trim()
+              });
+              log(`Transcript [User]: ${user.substring(0, 30)}...`, 'info');
+            }
+
+            if (model.trim()) {
+              transcriptHistoryRef.current.push({
+                id: `${now}_m`,
+                role: 'model',
+                type: 'text',
+                content: model.trim()
+              });
+              log(`Transcript [Model]: ${model.substring(0, 30)}...`, 'info');
+            }
+
+            currentTurnRef.current = { user: '', model: '' };
+          } else if (role === 'user') {
+            currentTurnRef.current.user += text;
+          } else if (role === 'model') {
+            currentTurnRef.current.model += text;
+          }
         },
         (err) => {
-           setStatus('error');
-           log(`Socket Error: ${err}`, 'error');
+          setStatus('error');
+          log(`Socket Error: ${err}`, 'error');
         }
       );
-      
+
       socketRef.current = socket;
       socket.connect(config, systemInstruction);
-      
+
       setStatus('connected');
-      
+
       // Initialize playback time
       const ctx = streamer.getContext();
       if (ctx) nextPlayTime.current = ctx.currentTime;
@@ -226,31 +229,31 @@ Do not break character. Speak Chinese.
     if (!ctx) return;
 
     try {
-       const binaryString = window.atob(base64);
-       const len = binaryString.length;
-       const bytes = new Uint8Array(len);
-       for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-       }
-       
-       const inputData = new Int16Array(bytes.buffer);
-       const float32 = new Float32Array(inputData.length);
-       for (let i = 0; i < inputData.length; i++) {
-         float32[i] = inputData[i] / 32768.0;
-       }
+      const binaryString = window.atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
 
-       const buffer = ctx.createBuffer(1, float32.length, 24000);
-       buffer.getChannelData(0).set(float32);
+      const inputData = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        float32[i] = inputData[i] / 32768.0;
+      }
 
-       const source = ctx.createBufferSource();
-       source.buffer = buffer;
-       source.connect(ctx.destination);
-       
-       const now = ctx.currentTime;
-       const startTime = Math.max(now, nextPlayTime.current);
-       
-       source.start(startTime);
-       nextPlayTime.current = startTime + buffer.duration;
+      const buffer = ctx.createBuffer(1, float32.length, config.sampleRate);
+      buffer.getChannelData(0).set(float32);
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      const startTime = Math.max(now, nextPlayTime.current);
+
+      source.start(startTime);
+      nextPlayTime.current = startTime + buffer.duration;
 
     } catch (e: any) {
       log(`Playback error: ${e.message}`, 'error');
@@ -269,37 +272,37 @@ Do not break character. Speak Chinese.
     disconnect();
     const endTime = Date.now();
     const durationSeconds = Math.floor((endTime - startTimeRef.current) / 1000);
-    
+
     // Flush any pending text in currentTurnRef
     const { user, model } = currentTurnRef.current;
     if (user.trim()) {
-         transcriptHistoryRef.current.push({
-             id: `${endTime}_u_final`,
-             role: 'user',
-             type: 'text',
-             content: user.trim()
-         });
+      transcriptHistoryRef.current.push({
+        id: `${endTime}_u_final`,
+        role: 'user',
+        type: 'text',
+        content: user.trim()
+      });
     }
     if (model.trim()) {
-         transcriptHistoryRef.current.push({
-             id: `${endTime}_m_final`,
-             role: 'model',
-             type: 'text',
-             content: model.trim()
-         });
+      transcriptHistoryRef.current.push({
+        id: `${endTime}_m_final`,
+        role: 'model',
+        type: 'text',
+        content: model.trim()
+      });
     }
-    
+
     // If no transcriptions were captured (e.g. error), provide fallback
     let finalMessages = [...transcriptHistoryRef.current];
     if (finalMessages.length === 0) {
-        finalMessages = [
-           {
-              id: '1', role: 'system', type: 'text', 
-              content: '未检测到对话内容或文本转录失败。' 
-           }
-        ];
+      finalMessages = [
+        {
+          id: '1', role: 'system', type: 'text',
+          content: '未检测到对话内容或文本转录失败。'
+        }
+      ];
     }
-    
+
     return {
       id: sessionDataRef.current.id,
       scenarioId,

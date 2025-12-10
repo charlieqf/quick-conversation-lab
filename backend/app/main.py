@@ -1,0 +1,37 @@
+"""
+Voice Model Lab - FastAPI Backend
+"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.routers import models, websocket
+
+app = FastAPI(
+    title="Voice Model Lab API",
+    description="Backend API for multi-model voice conversation testing",
+    version="0.1.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(models.router, prefix="/api/models", tags=["models"])
+app.include_router(websocket.router, tags=["websocket"])
+
+
+@app.get("/")
+async def root():
+    return {"message": "Voice Model Lab API", "version": "0.1.0"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
