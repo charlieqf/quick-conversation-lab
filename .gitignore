@@ -25,3 +25,5 @@ dist-ssr
 backend/venv
 *.pyc
 backend/.env
+materials
+.firebase/

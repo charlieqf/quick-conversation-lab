@@ -2,7 +2,7 @@
 Models API Router - List and get model capabilities
 """
 from fastapi import APIRouter, HTTPException, Response, Body
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import httpx
 import base64
@@ -73,7 +73,6 @@ async def get_model_voices(model_id: str):
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
     
     adapter_cls = ADAPTERS[model_id]
-    adapter = adapter_cls()
     adapter = adapter_cls()
     return adapter.capabilities.available_voices
 
@@ -158,7 +157,7 @@ async def preview_voice(req: PreviewRequest):
                             "text": f"Please say: {req.text}"
                         }]
                     }],
-                    "generationConfig": {
+                    "generation_config": {
                        "response_modalities": ["AUDIO"],
                        "speech_config": {
                           "voice_config": {
@@ -178,6 +177,9 @@ async def preview_voice(req: PreviewRequest):
                 
                 if res.status_code != 200:
                     print(f"Gemini TTS Error: {res.text}")
+                    if res.status_code == 404:
+                         # Fallback for preview model unavailability
+                         raise HTTPException(status_code=501, detail="Voice preview not supported by this model")
                     raise HTTPException(status_code=res.status_code, detail=f"Gemini Error: {res.text}")
                 
                 data = res.json()
@@ -203,3 +205,43 @@ async def preview_voice(req: PreviewRequest):
 
     else:
         raise HTTPException(status_code=400, detail="Unsupported model for preview")
+
+
+class ScenarioRequest(BaseModel):
+    contents: List[Dict[str, Any]]
+    model: Optional[str] = "gemini-2.5-flash"
+
+@router.post("/tools/scenario-generate")
+async def generate_scenario(req: ScenarioRequest):
+    """Proxy request to Gemini for scenario generation (secures API Key)"""
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=500, detail="Gemini API Key not configured on server")
+
+    # Use 2.5 Flash as standard
+    model_name = req.model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.post(
+                url,
+                json={"contents": req.contents},
+                timeout=60.0 # Allow longer timeout for generation
+            )
+            
+            if res.status_code != 200:
+                print(f"Scenario Gen Error: {res.text}")
+                raise HTTPException(status_code=res.status_code, detail=f"Gemini Error: {res.text}")
+                
+            data = res.json()
+            # Extract text from standard Gemini response
+            try:
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return {"text": text}
+            except (KeyError, IndexError):
+                raise HTTPException(status_code=500, detail="Invalid response format from Gemini")
+                
+        except Exception as e:
+            print(f"Scenario Gen Exception: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+

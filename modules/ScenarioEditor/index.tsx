@@ -5,7 +5,6 @@ import { ScriptTab } from './components/ScriptTab';
 import { ConfigTab } from './components/ConfigTab';
 import { DebugConsole } from './components/DebugConsole';
 import { ScenarioConfig, LogEntry, AttachedFile, AIModelId } from '../../types';
-import { GoogleGenAI } from "@google/genai";
 
 interface ScenarioEditorModuleProps {
   scenarioId?: string; // If editing existing
@@ -71,7 +70,7 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
               // Fallback for legacy data (arrays) to strings
               workflow: Array.isArray(found.workflow) ? found.workflow.join('\n') : (found.workflow || ''),
               knowledgePoints: Array.isArray(found.knowledgePoints) ? found.knowledgePoints.join('\n') : (found.knowledgePoints || ''),
-              scoringCriteria: Array.isArray(found.scoringCriteria) ? found.scoringCriteria.map((i:any) => `${i.criteria} (${i.points}pts)`).join('\n') : (found.scoringCriteria || ''),
+              scoringCriteria: Array.isArray(found.scoringCriteria) ? found.scoringCriteria.map((i: any) => `${i.criteria} (${i.points}pts)`).join('\n') : (found.scoringCriteria || ''),
               scoringDimensions: found.scoringDimensions || []
             });
             if (found.scriptContent) {
@@ -95,7 +94,7 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
     // 1. Locate the outer braces
     const firstOpen = text.indexOf('{');
     const lastClose = text.lastIndexOf('}');
-    
+
     if (firstOpen === -1 || lastClose === -1 || lastClose <= firstOpen) {
       throw new Error("Cannot find valid JSON object (missing braces).");
     }
@@ -130,44 +129,24 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
     setGeneratedConfig(prev => ({ ...prev, description: 'AI 正在分析生成中...' }));
 
     // Determine Model from Settings
-    let selectedModel: AIModelId = 'gemini-2.5-flash';
-    try {
-      const savedSettings = localStorage.getItem('quick_settings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        if (parsed.selectedModel) {
-          selectedModel = parsed.selectedModel;
-        }
-      }
-    } catch (e) {
-      console.warn('Could not read settings, using default model.');
-    }
+    // Always use Gemini 2.5 Flash for Scenario Generation (Standard for 2025)
+    const selectedModel = 'gemini-2.5-flash';
 
-    const modelDisplay = selectedModel.includes('pro') ? 'Wanyi Pro' : 'Wanyi Flash';
-    addLog(`初始化 Wanyi AI 模型 (${modelDisplay})...`, 'info');
+    const modelDisplay = 'Gemini 2.5 Flash (Backend)';
+    addLog(`初始化 AI 模型 (${modelDisplay})...`, 'info');
 
     try {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) {
-        throw new Error("API Key 未配置。请前往设置页连接 Google AI Studio。");
-      }
-      const ai = new GoogleGenAI({ apiKey });
-      
       let contents: any[] = [];
       let logPromptDetail = "";
 
       // Smart Mode Selection:
-      // If we have extracted text in scriptContent (from ScriptTab PDF parsing), we use TEXT MODE.
-      // We only use Multimodal (Inline Base64) if extraction failed or content is empty.
-      // This prevents HTTP 413 Payload Too Large errors when uploading many PDFs.
-      const hasExtractedText = scriptContent.trim().length > 50; 
+      const hasExtractedText = scriptContent.trim().length > 50;
       const useMultimodalMode = attachedFiles.length > 0 && !hasExtractedText;
 
-      // BRANCH 1: Multimodal File Mode (Fallback for Image PDFs)
+      // BRANCH 1: Multimodal File Mode
       if (useMultimodalMode) {
         addLog(`检测到附件且无提取文本，启用多模态文件分析模式 (Base64)。`, 'info');
-        
-        // Construct User Instruction for File Analysis
+
         const fileInstruction = `
 请执行以下步骤来分析提供的 PDF/文件内容：
 1. **逐一识别内容**：仔细阅读附件文件，特别是如果是 PDF 表格，请还原表格中的流程步骤、对话内容和评分点。
@@ -189,17 +168,17 @@ ${systemPrompt}
           });
           logPromptDetail += `[File: ${file.name} (${file.mimeType})]\n`;
         });
-        
+
         contents = [{ role: 'user', parts: parts }];
 
       } else {
-        // BRANCH 2: Text Only Mode (Optimized for Large Docs)
+        // BRANCH 2: Text Only Mode
         if (attachedFiles.length > 0) {
-           addLog(`检测到 ${attachedFiles.length} 个附件的提取文本，启用纯文本分析模式 (已优化 Payload)。`, 'success');
+          addLog(`检测到 ${attachedFiles.length} 个附件的提取文本，启用纯文本分析模式 (已优化 Payload)。`, 'success');
         } else {
-           addLog('启用纯文本分析模式。', 'info');
+          addLog('启用纯文本分析模式。', 'info');
         }
-        
+
         const fullUserPrompt = `
 <system_instruction>
 ${systemPrompt}
@@ -214,32 +193,34 @@ ${scriptContent}
       }
 
       addLog(`Prompt 构建完成。`, 'info', logPromptDetail);
-      addLog(`建立流式连接 (${modelDisplay})...`, 'info');
+      addLog(`正在请求后端生成接口 (${selectedModel})...`, 'info');
 
-      const responseStream = await ai.models.generateContentStream({
-        model: selectedModel,
-        contents: contents,
+      // Call Backend Proxy
+      // Note: Backend handles API Key securely
+      const response = await fetch('/api/models/tools/scenario-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          contents: contents
+        })
       });
 
-      let fullText = '';
-      let chunkCount = 0;
-      
-      for await (const chunk of responseStream) {
-        const text = chunk.text;
-        if (text) {
-          fullText += text;
-          chunkCount++;
-          if (chunkCount % 5 === 0) {
-             addLog(`接收数据块 #${chunkCount}...`, 'stream', text);
-          }
-        }
+      if (!response.ok) {
+        const errDetail = await response.text();
+        throw new Error(`Server Error (${response.status}): ${errDetail}`);
       }
 
-      addLog(`流式传输完成 (共 ${fullText.length} 字符)。开始解析...`, 'info', fullText);
+      const data = await response.json();
+      const fullText = data.text; // Backend returns { text: "..." }
+
+      addLog(`生成完成 (共 ${fullText.length} 字符)。开始解析...`, 'info', fullText);
 
       try {
         const parsed = extractAndRepairJSON(fullText);
-        
+
         const merged: ScenarioConfig = {
           ...DEFAULT_CONFIG,
           ...parsed,
@@ -253,9 +234,9 @@ ${scriptContent}
         setGeneratedConfig(merged);
         addLog('JSON 解析与验证成功！', 'success');
         addLog('自动跳转至配置页...', 'info');
-        
+
         setTimeout(() => setActiveTab('config'), 1500);
-        
+
       } catch (e: any) {
         let errorMsg = `JSON 解析失败: ${e.message}`;
         if (e.message.includes('position')) {
@@ -270,7 +251,7 @@ ${scriptContent}
       }
 
     } catch (error: any) {
-      addLog(`API 调用异常: ${error.message}`, 'error', error.stack);
+      addLog(`生成过程异常: ${error.message}`, 'error', error.stack);
     } finally {
       setIsGenerating(false);
     }
@@ -279,7 +260,7 @@ ${scriptContent}
   const handleSave = () => {
     const saved = localStorage.getItem('quick_scenarios');
     let scenarios = saved ? JSON.parse(saved) : [];
-    
+
     const newScenario = {
       id: scenarioId || Date.now().toString(),
       ...generatedConfig,
@@ -295,7 +276,7 @@ ${scriptContent}
 
     localStorage.setItem('quick_scenarios', JSON.stringify(scenarios));
     addLog('场景已保存到本地存储。', 'success');
-    
+
     setTimeout(onBack, 1000);
   };
 
@@ -309,7 +290,7 @@ ${scriptContent}
         <div>
           <h2 className="text-base font-bold text-slate-800">{scenarioId ? '编辑场景' : '新建场景'}</h2>
           <p className="text-[10px] text-slate-400 font-mono">
-             {scenarioId ? `ID: ${scenarioId}` : 'Draft Mode'}
+            {scenarioId ? `ID: ${scenarioId}` : 'Draft Mode'}
           </p>
         </div>
       </div>
@@ -318,22 +299,20 @@ ${scriptContent}
       <div className="flex items-center p-1 mx-4 mt-4 bg-slate-200/60 rounded-lg flex-shrink-0">
         <button
           onClick={() => setActiveTab('script')}
-          className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${
-            activeTab === 'script' 
-              ? 'bg-white text-medical-700 shadow-sm' 
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
+          className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'script'
+            ? 'bg-white text-medical-700 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+            }`}
         >
           <FileText className="w-3.5 h-3.5 mr-1.5" />
           场景设计 (Script)
         </button>
         <button
           onClick={() => setActiveTab('config')}
-          className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${
-            activeTab === 'config' 
-              ? 'bg-white text-medical-700 shadow-sm' 
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
+          className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'config'
+            ? 'bg-white text-medical-700 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+            }`}
         >
           <SettingsIcon className="w-3.5 h-3.5 mr-1.5" />
           场景描述 (Config)
@@ -343,26 +322,26 @@ ${scriptContent}
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
         {activeTab === 'script' ? (
-            <ScriptTab 
-              content={scriptContent} 
-              onContentChange={setScriptContent}
-              attachedFiles={attachedFiles}
-              onFilesChange={setAttachedFiles}
-              onGenerate={handleGenerate}
-              isGenerating={isGenerating}
-              currentPrompt={systemPrompt}
-              onPromptChange={setSystemPrompt}
-              onLog={(msg, type) => addLog(msg, type)}
-            />
+          <ScriptTab
+            content={scriptContent}
+            onContentChange={setScriptContent}
+            attachedFiles={attachedFiles}
+            onFilesChange={setAttachedFiles}
+            onGenerate={handleGenerate}
+            isGenerating={isGenerating}
+            currentPrompt={systemPrompt}
+            onPromptChange={setSystemPrompt}
+            onLog={(msg, type) => addLog(msg, type)}
+          />
         ) : (
-          <ConfigTab 
-            config={generatedConfig} 
+          <ConfigTab
+            config={generatedConfig}
             onChange={setGeneratedConfig}
             onSave={handleSave}
             onLog={(msg, type, detail) => addLog(msg, type, detail)}
           />
         )}
-        
+
         {/* Debug Console - Global */}
         <DebugConsole logs={logs} onClear={() => setLogs([])} />
       </div>

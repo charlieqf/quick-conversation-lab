@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import asyncio
 import websockets
 from typing import Optional
@@ -73,7 +74,7 @@ class TongyiAdapter(BaseModelAdapter):
                 "data": {
                     "modalities": ["text", "audio"],
                     "input_audio_format": "pcm16",
-                    "output_audio_format": "wav",
+                    "output_audio_format": "pcm16",
                     "audio_sample_rate": config.audio.sample_rate,
                     "turn_detection": {"type": "vad"},
                     "instructions": config.system_instruction or "",
@@ -135,6 +136,33 @@ class TongyiAdapter(BaseModelAdapter):
             print(f"Tongyi response.create error (debounced): {e}")
             self._response_in_progress = False
 
+    def _pcm_to_wav_base64(self, audio_b64: str, sample_rate: int = 16000) -> str:
+        pcm_bytes = base64.b64decode(audio_b64)
+        num_channels = 1
+        bits_per_sample = 16
+        byte_rate = sample_rate * num_channels * bits_per_sample // 8
+        block_align = num_channels * bits_per_sample // 8
+        data_size = len(pcm_bytes)
+        chunk_size = 36 + data_size
+        
+        header = b"".join([
+            b"RIFF",
+            chunk_size.to_bytes(4, "little"),
+            b"WAVE",
+            b"fmt ",
+            (16).to_bytes(4, "little"),
+            (1).to_bytes(2, "little"),
+            num_channels.to_bytes(2, "little"),
+            sample_rate.to_bytes(4, "little"),
+            byte_rate.to_bytes(4, "little"),
+            block_align.to_bytes(2, "little"),
+            bits_per_sample.to_bytes(2, "little"),
+            b"data",
+            data_size.to_bytes(4, "little")
+        ])
+        wav_bytes = header + pcm_bytes
+        return base64.b64encode(wav_bytes).decode("ascii")
+
     async def _receive_loop(self):
         try:
             async for message in self._ws:
@@ -149,7 +177,14 @@ class TongyiAdapter(BaseModelAdapter):
                     self._response_in_progress = True
                     audio_b64 = payload.get("audio") or payload.get("delta")
                     if audio_b64:
-                        self._emit_audio(audio_b64, 0)
+                        try:
+                            pcm = base64.b64decode(audio_b64)
+                            if len(pcm) < 4 or len(pcm) % 2 != 0:
+                                continue
+                            wav_b64 = self._pcm_to_wav_base64(audio_b64, 16000)
+                            self._emit_audio(wav_b64, 0)
+                        except Exception:
+                            pass
 
                 elif event_type == "response.output_text.delta":
                     self._response_in_progress = True
