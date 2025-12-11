@@ -9,8 +9,13 @@ from app.routers import models, websocket, history, users, data_manage
 from app.database import engine
 from app import models as db_models
 
-# Init DB tables
-db_models.Base.metadata.create_all(bind=engine)
+# Init DB tables (Robust)
+try:
+    db_models.Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"DB Init Error: {e}")
+    # Continue startup even if DB fails, to allow debugging via API
+    pass
 
 app = FastAPI(
     title="Voice Model Lab API",

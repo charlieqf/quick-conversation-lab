@@ -102,6 +102,7 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     
     async def handle_error_async(code: int, message: str):
         try:
+            print(f"WS Handling Error: Code={code}, Message={message}")
             if websocket.client_state.name == "CONNECTED":
                 await websocket.send_json({
                     "type": "error",
@@ -119,6 +120,7 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
             pass
 
     def on_error(code: int, message: str):
+        print(f"WS Adapter Error Callback: {code} - {message}")
         asyncio.create_task(handle_error_async(code, message))
     
     # Register callbacks
@@ -180,6 +182,18 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                      await handle_error_async(4003, f"Unsupported encoding: {requested_encoding}. Supported: {cap.supported_encodings}")
                      return
                 
+                requested_voice_id = payload.get("voice", {}).get("voiceId")
+                
+                # Validation: Check if voice is supported by this model
+                valid_voice_ids = [v["id"] for v in cap.available_voices]
+                
+                if requested_voice_id and requested_voice_id in valid_voice_ids:
+                    final_voice_id = requested_voice_id
+                else:
+                    # Fallback to model default if invalid or missing
+                    print(f"WS Warning: Invalid voice '{requested_voice_id}' for model {model_id}. Using default '{cap.default_voice}'")
+                    final_voice_id = cap.default_voice
+
                 config = SessionConfig(
                     model_id=model_id,
                     audio=AudioConfig(
@@ -188,7 +202,7 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                         channels=payload.get("audio", {}).get("channels", 1)
                     ),
                     voice=VoiceConfig(
-                        voice_id=payload.get("voice", {}).get("voiceId", "Kore"),
+                        voice_id=final_voice_id,
                         language=payload.get("voice", {}).get("language", "zh-CN")
                     ),
                     system_instruction=payload.get("session", {}).get("systemInstruction", ""),
@@ -205,7 +219,7 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                     # But we ensure we return if status is not connected
                     print(f"WS Error: Connection failed for {model_id}")
                     if websocket.client_state.name == "CONNECTED": # Check if WS still open
-                         await websocket.close(code=4001)
+                         await websocket.close(code=4001, reason="Adapter failed to connect")
                     return
                 
                 await websocket.send_json({

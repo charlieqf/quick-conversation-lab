@@ -15,6 +15,8 @@ class OpenAIAdapter(BaseModelAdapter):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._session_id: Optional[str] = None
+        self._response_in_progress: bool = False
+        self._user_speech_detected: bool = False
     
     @property
     def id(self) -> str:
@@ -70,7 +72,7 @@ class OpenAIAdapter(BaseModelAdapter):
 
         try:
             self._status = AdapterStatus.CONNECTING
-            self._ws = await websockets.connect(url, extra_headers=headers)
+            self._ws = await websockets.connect(url, additional_headers=headers)
             self._status = AdapterStatus.CONNECTED
             
             # Start receive loop
@@ -80,6 +82,7 @@ class OpenAIAdapter(BaseModelAdapter):
             await self._send_session_update(config)
             
         except Exception as e:
+            print(f"OpenAI Connect Error: {e}")
             self._status = AdapterStatus.ERROR
             self._emit_error(4002, f"Failed to connect to OpenAI: {str(e)}")
             await self.disconnect()
@@ -99,9 +102,9 @@ class OpenAIAdapter(BaseModelAdapter):
                 },
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.5,
+                    "threshold": 0.6,
                     "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500
+                    "silence_duration_ms": 800
                 }
             }
         }
@@ -135,6 +138,8 @@ class OpenAIAdapter(BaseModelAdapter):
             "audio": audio_base64
         }
         try:
+            if sequence % 50 == 0:
+                print(f"WS Debug: Sending OpenAI Audio Chunk {sequence}")
             await self._ws.send(json.dumps(msg))
         except Exception as e:
             print(f"Error sending audio: {e}")
@@ -149,37 +154,74 @@ class OpenAIAdapter(BaseModelAdapter):
                     self._session_id = data.get("session", {}).get("id")
                     
                 elif event_type == "response.audio.delta":
-                    # Audio output
                     b64_audio = data.get("delta", "")
                     if b64_audio:
-                        self._emit_audio(b64_audio, 0) # Sequence not strictly tracked by OpenAI protocol
+                        self._emit_audio(b64_audio, 0)
                         
                 elif event_type == "response.audio_transcript.delta":
-                    # Model transcript (streaming)
+                    text = data.get("delta", "")
+                    if text:
+                        self._emit_transcription("model", text, is_final=False)
+
+                elif event_type == "response.text.delta":
+                    # Handle separate text modality if enabled
                     text = data.get("delta", "")
                     if text:
                         self._emit_transcription("model", text, is_final=False)
 
                 elif event_type == "conversation.item.input_audio_transcription.completed":
-                    # User transcript (final)
+                    # Strongest signal that user turn is done
                     text = data.get("transcript", "")
                     if text:
                         self._emit_transcription("user", text, is_final=True)
+                        self._user_speech_detected = True # Confirm valid speech
+                    
+                    # Trigger response if:
+                    # 1. We have detected speech (via VAD or Text) AND 
+                    # 2. No response is currently in progress
+                    # 3. We have actual text (don't respond to empty transcripts unless VAD confirmed speech was real and maybe unsupported language?)
+                    should_respond = (self._user_speech_detected or bool(text)) and not self._response_in_progress
+                    
+                    if should_respond:
+                        print(f"WS Debug: OpenAI Transcription Completed (Text={bool(text)}) - Triggering Response")
+                        self._response_in_progress = True
+                        await self._ws.send(json.dumps({
+                            "type": "response.create",
+                            "response": {"modalities": ["text", "audio"]}
+                        }))
                         
-                elif event_type == "response.output_item.done":
-                    # Check if it was a message response
-                    item = data.get("item", {})
-                    if item.get("type") == "message":
-                        # Mark model turn as potentially done?
-                        pass
+                elif event_type == "input_audio_buffer.speech_started":
+                    print("WS Debug: OpenAI VAD - Speech Started")
+                    self._user_speech_detected = True
+                    
+                elif event_type == "input_audio_buffer.speech_stopped":
+                    print("WS Debug: OpenAI VAD - Speech Stopped")
+                    # Fallback trigger: Only if we truly detected speech start/content
+                    if self._user_speech_detected and not self._response_in_progress:
+                        print("WS Debug: OpenAI VAD Stopped - Triggering Response (Fallback)")
+                        self._response_in_progress = True
+                        await self._ws.send(json.dumps({
+                            "type": "response.create",
+                            "response": {"modalities": ["text", "audio"]}
+                        }))
+
+                elif event_type == "response.done":
+                    # Turn complete
+                    if self._response_in_progress:
+                        self._response_in_progress = False
+                        self._user_speech_detected = False # Reset for next turn
+                        self._emit_transcription("system", "TURN_COMPLETE", True)
 
                 elif event_type == "error":
                     err = data.get("error", {})
+                    print(f"WS Error: OpenAI Event Error: {err}")
+                    self._response_in_progress = False 
+                    self._user_speech_detected = False
                     self._emit_error(4003, f"OpenAI Error: {err.get('message')}")
 
         except websockets.ConnectionClosed:
             if self._status == AdapterStatus.CONNECTED:
                 self._status = AdapterStatus.DISCONNECTED
-                # self._emit_error(1000, "Connection closed by server")
         except Exception as e:
             print(f"OpenAI Receive Loop Error: {e}")
+            self._response_in_progress = False
