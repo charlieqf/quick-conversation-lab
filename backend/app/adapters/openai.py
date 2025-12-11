@@ -5,6 +5,7 @@ import base64
 import websockets
 from typing import Optional
 from .base import BaseModelAdapter, ModelCapabilities, AdapterStatus, SessionConfig
+from app.config import settings
 
 class OpenAIAdapter(BaseModelAdapter):
     """Adapter for OpenAI Realtime API (GPT-4o Audio) using WebSockets"""
@@ -29,7 +30,7 @@ class OpenAIAdapter(BaseModelAdapter):
     
     @property
     def capabilities(self) -> ModelCapabilities:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = settings.openai_api_key
         return ModelCapabilities(
             id=self.id,
             name=self.name,
@@ -55,13 +56,13 @@ class OpenAIAdapter(BaseModelAdapter):
         )
 
     async def connect(self, config: SessionConfig) -> None:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = settings.openai_api_key
         if not api_key:
             self._status = AdapterStatus.ERROR
             self._emit_error(4001, "OpenAI API key not configured")
             return
         
-        url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+        url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "OpenAI-Beta": "realtime=v1"

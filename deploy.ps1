@@ -22,7 +22,49 @@ if (-not (Get-Command firebase -ErrorAction SilentlyContinue)) {
 
 # 2. Deploy Backend to Cloud Run
 Write-Host "`n[1/3] Deploying Backend to Cloud Run..." -ForegroundColor Yellow
-$backendDeployCommand = "gcloud run deploy $SERVICE_NAME --source ./backend --region $REGION --project $PROJECT_ID --allow-unauthenticated"
+
+# Parse .env file for environment variables
+$envFile = "./backend/.env"
+$envVars = @()
+if (Test-Path $envFile) {
+    $lines = Get-Content $envFile
+    foreach ($line in $lines) {
+        $line = $line.Trim()
+        if ($line -match '^([^#=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            
+            # Remove inline comments (naive: assumes # starts comment if preceded by space)
+            if ($value -match '^(.*?)(\s+#.*)$') {
+                $value = $matches[1].Trim()
+            }
+            
+            # Remove surrounding quotes
+            if ($value -match '^"(.*)"$') { $value = $matches[1] }
+            elseif ($value -match "^'(.*)'$") { $value = $matches[1] }
+            
+            # Escape commas for gcloud
+            $value = $value -replace ',', '\,'
+            
+            $envVars += "$key=$value"
+        }
+    }
+}
+$envString = $envVars -join ","
+
+if (-not $envString) {
+    Write-Warning "No environment variables found in $envFile or file missing."
+    $backendDeployCommand = "gcloud run deploy $SERVICE_NAME --source ./backend --region $REGION --project $PROJECT_ID --allow-unauthenticated"
+}
+else {
+    Write-Host "Found environment variables, injecting into deployment (truncated for security):"
+    $envVars | ForEach-Object { 
+        if ($_.StartsWith("DATABASE_URL")) { Write-Host $_ } 
+        else { Write-Host ($_.Split('=')[0] + "=[REDACTED]") }
+    }
+    $backendDeployCommand = "gcloud run deploy $SERVICE_NAME --source ./backend --region $REGION --project $PROJECT_ID --allow-unauthenticated --set-env-vars ""$envString"""
+}
+
 Write-Host "Executing: $backendDeployCommand"
 Invoke-Expression $backendDeployCommand
 

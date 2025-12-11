@@ -257,14 +257,14 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                     last_audio_time = current_time
                 
                 audio_chunks_in_window += 1
-                if audio_chunks_in_window > 50: # Rate limit
-                     if audio_chunks_in_window > 100:
+                if audio_chunks_in_window > 100: # Relaxed rate limit
+                     if audio_chunks_in_window > 200:
                          # Abuse detected, close connection
                          await websocket.close(code=1008, reason="Rate limit exceeded")
                          return
                      
                      # Warn once
-                     if audio_chunks_in_window == 51:
+                     if audio_chunks_in_window == 101:
                          await websocket.send_json({
                             "type": "warning",
                             "timestamp": int(time.time() * 1000),
