@@ -31,7 +31,7 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   // Initialize with 24000 Hz for Gemini
   const [config, setConfig] = useState<SessionConfig>({
     ...DEFAULT_SESSION_CONFIG,
-    sampleRate: 24000
+    sampleRate: 16000
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [volume, setVolume] = useState(0);
@@ -260,42 +260,44 @@ Do not break character. Speak Chinese.
     }
   };
 
+  // Playback Queue to ensure order with async decoding
+  const playQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const playAudioChunk = (base64: string) => {
-    const streamer = streamerRef.current;
-    if (!streamer) return;
-    const ctx = streamer.getContext();
-    if (!ctx) return;
+    // Chain the decoding and playback to ensure sequence
+    playQueueRef.current = playQueueRef.current.then(async () => {
+      const streamer = streamerRef.current;
+      if (!streamer) return;
+      const ctx = streamer.getContext();
+      if (!ctx) return;
 
-    try {
-      const binaryString = window.atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      try {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Use decodeAudioData to correctly parse WAV header and resample if needed
+        const audioBuffer = await ctx.decodeAudioData(bytes.buffer);
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        // Schedule next chunk at the end of the previous one
+        // Ensure we don't schedule in the past if there was a gap
+        const startTime = Math.max(now, nextPlayTime.current);
+
+        source.start(startTime);
+        nextPlayTime.current = startTime + audioBuffer.duration;
+
+      } catch (e: any) {
+        log(`Playback error: ${e.message}`, 'error');
       }
-
-      const inputData = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(inputData.length);
-      for (let i = 0; i < inputData.length; i++) {
-        float32[i] = inputData[i] / 32768.0;
-      }
-
-      const buffer = ctx.createBuffer(1, float32.length, config.sampleRate);
-      buffer.getChannelData(0).set(float32);
-
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-      const startTime = Math.max(now, nextPlayTime.current);
-
-      source.start(startTime);
-      nextPlayTime.current = startTime + buffer.duration;
-
-    } catch (e: any) {
-      log(`Playback error: ${e.message}`, 'error');
-    }
+    });
   };
 
   const disconnect = () => {

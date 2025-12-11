@@ -1,9 +1,15 @@
 """
 Models API Router - List and get model capabilities
 """
-from fastapi import APIRouter, HTTPException, Response
-from typing import List
+from fastapi import APIRouter, HTTPException, Response, Body
+from typing import List, Optional
+from pydantic import BaseModel
+import httpx
+import base64
+import struct
+import json
 
+from app.config import settings
 from app.adapters.base import ModelCapabilities
 from app.adapters.gemini import GeminiAdapter
 
@@ -68,4 +74,132 @@ async def get_model_voices(model_id: str):
     
     adapter_cls = ADAPTERS[model_id]
     adapter = adapter_cls()
+    adapter = adapter_cls()
     return adapter.capabilities.available_voices
+
+
+class PreviewRequest(BaseModel):
+    modelId: str
+    voiceId: str
+    text: Optional[str] = "Hello, this is a voice preview."
+
+
+@router.post("/preview")
+async def preview_voice(req: PreviewRequest):
+    """Generate a short audio preview for the selected voice"""
+    
+    # 1. OpenAI Handling
+    if req.modelId.startswith("openai") or "gpt" in req.modelId:
+        if not settings.openai_api_key:
+             raise HTTPException(status_code=400, detail="OpenAI API Key not configured")
+
+        try:
+            async with httpx.AsyncClient() as client:
+                # https://platform.openai.com/docs/api-reference/audio/createSpeech
+                res = await client.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={
+                        "Authorization": f"Bearer {settings.openai_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "tts-1", # Standard TTS model
+                        "input": req.text,
+                        "voice": req.voiceId.lower() # OpenAI voices are lowercase
+                    },
+                    timeout=10.0
+                )
+                
+                if res.status_code != 200:
+                    print(f"OpenAI TTS Error: {res.text}")
+                    raise HTTPException(status_code=res.status_code, detail=f"Provider Error: {res.text}")
+                
+                return Response(content=res.content, media_type="audio/mpeg")
+                
+        except Exception as e:
+            print(f"TTS Exception: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # 2. Gemini Handling
+    elif req.modelId.startswith("gemini"):
+        if not settings.gemini_api_key:
+             raise HTTPException(status_code=400, detail="Gemini API Key not configured")
+
+        try:
+            # Helper to create WAV header for 24kHz, 16-bit, Mono
+            def create_wav_header(pcm_data_len: int, sample_rate: int = 24000) -> bytes:
+                # RIFF chunk
+                header = b'RIFF'
+                header += struct.pack('<I', 36 + pcm_data_len) # File size - 8
+                header += b'WAVE'
+                
+                # fmt chunk
+                header += b'fmt '
+                header += struct.pack('<I', 16) # Chunk size (16 for PCM)
+                header += struct.pack('<H', 1)  # Audio format (1 for PCM)
+                header += struct.pack('<H', 1)  # Num channels (1 for Mono)
+                header += struct.pack('<I', sample_rate) # Sample rate
+                header += struct.pack('<I', sample_rate * 2) # Byte rate (SampleRate * NumChannels * BitsPerSample/8)
+                header += struct.pack('<H', 2)  # Block align (NumChannels * BitsPerSample/8)
+                header += struct.pack('<H', 16) # Bits per sample
+                
+                # data chunk
+                header += b'data'
+                header += struct.pack('<I', pcm_data_len)
+                return header
+
+            async with httpx.AsyncClient() as client:
+                model_name = "gemini-2.5-flash-native-audio-preview-09-2025" # Hardcoded best model for audio
+                url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model_name}:generateContent?key={settings.gemini_api_key}"
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{
+                            "text": f"Please say: {req.text}"
+                        }]
+                    }],
+                    "generationConfig": {
+                       "response_modalities": ["AUDIO"],
+                       "speech_config": {
+                          "voice_config": {
+                              "prebuilt_voice_config": {
+                                  "voice_name": req.voiceId
+                              }
+                          }
+                       }
+                    }
+                }
+                
+                res = await client.post(
+                    url,
+                    json=payload,
+                    timeout=15.0
+                )
+                
+                if res.status_code != 200:
+                    print(f"Gemini TTS Error: {res.text}")
+                    raise HTTPException(status_code=res.status_code, detail=f"Gemini Error: {res.text}")
+                
+                data = res.json()
+                # Extract inlineData
+                # Response structure: candidates[0].content.parts[0].inlineData.data (Base64)
+                try:
+                    b64_data = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+                    pcm_bytes = base64.b64decode(b64_data)
+                    
+                    # Create WAV container
+                    wav_header = create_wav_header(len(pcm_bytes))
+                    wav_data = wav_header + pcm_bytes
+                    
+                    return Response(content=wav_data, media_type="audio/wav")
+                    
+                except (KeyError, IndexError) as ignored:
+                    print(f"Gemini Unexpected Response: {data}")
+                    raise HTTPException(status_code=502, detail="Invalid response format from Gemini")
+                    
+        except Exception as e:
+            print(f"Gemini TTS Exception: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported model for preview")

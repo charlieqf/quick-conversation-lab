@@ -4,17 +4,61 @@ import { Mic, Play, Volume2, Loader2, VolumeX } from 'lucide-react';
 
 interface VoiceSelectorProps {
   selectedVoice: string;
+  modelId: string;
   onSelect: (id: string) => void;
   voices: APIVoice[];
   isLoading?: boolean;
 }
 
-export const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onSelect, voices, isLoading }) => {
+export const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, modelId, onSelect, voices, isLoading }) => {
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   const playPreview = async (voiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    alert("Voice preview is currently disabled while moving to backend-only keys. (Coming Soon)");
+
+    if (playingVoiceId) return; // Prevent multiple plays
+
+    try {
+      setPlayingVoiceId(voiceId);
+      setIsPlaying(true);
+
+      const res = await fetch('/api/models/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          modelId: modelId,
+          voiceId: voiceId,
+          text: "Hello! This is a preview of my voice."
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 501) {
+          alert("Preview not available for this model yet.");
+        } else {
+          throw new Error("Preview failed");
+        }
+        return;
+      }
+
+      const blob = await res.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.onended = () => {
+        setPlayingVoiceId(null);
+        setIsPlaying(false);
+      };
+      await audio.play();
+
+    } catch (err) {
+      console.error(err);
+      alert("Failed to play preview");
+      setPlayingVoiceId(null);
+      setIsPlaying(false);
+    }
   };
 
   if (isLoading) {
@@ -79,16 +123,23 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onS
                 </div>
               </div>
 
-              {/* Play Sample Button (Disabled for MVP) */}
+              {/* Play Sample Button */}
               <button
                 onClick={(e) => playPreview(voice.id, e)}
+                disabled={isPlaying && playingVoiceId !== voice.id}
                 className={`
                   w-8 h-8 flex items-center justify-center rounded-full transition-all
-                  text-slate-300 hover:text-slate-400 cursor-not-allowed
+                  ${isPlaying && playingVoiceId === voice.id
+                    ? 'text-medical-600 bg-medical-50 animate-pulse'
+                    : 'text-slate-300 hover:text-medical-600 hover:bg-slate-100'}
                 `}
-                title="试听暂不可用 (Coming Soon)"
+                title="点击试听 (Preview Voice)"
               >
-                <VolumeX className="w-4 h-4" />
+                {isPlaying && playingVoiceId === voice.id ? (
+                  <Volume2 className="w-4 h-4" />
+                ) : (
+                  <Play className="w-4 h-4 ml-0.5" />
+                )}
               </button>
             </div>
           );

@@ -7,7 +7,7 @@ export class AudioStreamer {
   private workletNode: AudioWorkletNode | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
-  
+
   private onDataCallback: (data: Float32Array) => void;
   private logCallback: (msg: string, type: 'info' | 'error') => void;
 
@@ -22,9 +22,12 @@ export class AudioStreamer {
   async start(sampleRate: number) {
     try {
       this.logCallback(`Initializing AudioContext at ${sampleRate}Hz...`, 'info');
-      
+
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       this.context = new AudioContextClass({ sampleRate });
+      if (this.context.state === 'suspended') {
+        await this.context.resume();
+      }
 
       // 1. Get Microphone
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -54,7 +57,7 @@ export class AudioStreamer {
       // 4. Wiring: Source -> Analyser -> Worklet -> Destination (Muted to prevent feedback loop but keep alive)
       // Note: We don't connect Worklet to Destination because we are capturing input, not monitoring it.
       // But browser might garbage collect if not connected. Best practice is to connect to a muted gain.
-      
+
       this.sourceNode.connect(this.analyser);
       this.analyser.connect(this.workletNode);
       this.workletNode.connect(this.context.destination); // Required for 'process' to fire in Chrome
@@ -78,7 +81,7 @@ export class AudioStreamer {
     const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
     this.analyser.getByteFrequencyData(dataArray);
     let sum = 0;
-    for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
+    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
     return sum / dataArray.length;
   }
 
@@ -89,11 +92,11 @@ export class AudioStreamer {
   }
 
   playBuffer(audioBuffer: AudioBuffer, startTime: number) {
-     if (!this.context) return;
-     const source = this.context.createBufferSource();
-     source.buffer = audioBuffer;
-     source.connect(this.context.destination);
-     source.start(startTime);
+    if (!this.context) return;
+    const source = this.context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(this.context.destination);
+    source.start(startTime);
   }
 
   getContext() {
@@ -108,7 +111,7 @@ export class AudioStreamer {
     if (this.workletNode) this.workletNode.disconnect();
     if (this.sourceNode) this.sourceNode.disconnect();
     if (this.context) this.context.close();
-    
+
     this.mediaStream = null;
     this.context = null;
   }

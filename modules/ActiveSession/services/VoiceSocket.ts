@@ -94,7 +94,7 @@ export class VoiceSocket {
                     maxDuration: 600
                 },
                 audio: {
-                    sampleRate: config.audio?.sampleRate || 24000,
+                    sampleRate: config.audio?.sampleRate || 16000,
                     encoding: config.audio?.encoding || "pcm_s16le",
                     channels: config.audio?.channels || 1
                 },
@@ -176,6 +176,11 @@ export class VoiceSocket {
 
             case 'warning':
                 this.logCallback(`Server Warning: ${payload.code} ${payload.message}`, 'error');
+                break;
+
+            default:
+                // Debug visibility for unexpected messages
+                this.logCallback(`RX ${type}`, 'info');
                 break;
         }
     }

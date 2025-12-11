@@ -151,6 +151,7 @@ export const SettingsModule: React.FC = () => {
 
         {/* Section 3: Voice */}
         <VoiceSelector
+          modelId={settings.selectedModel}
           selectedVoice={settings.selectedVoice}
           onSelect={(id) => updateSettings({ selectedVoice: id })}
           voices={voices}

@@ -301,6 +301,9 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     
     except WebSocketDisconnect:
         pass
+    except RuntimeError:
+        # Starlette throws "Need to call accept first" if socket is dead when we try to read
+        pass
     except json.JSONDecodeError:
         await websocket.send_json({
             "type": "error",

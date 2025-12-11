@@ -4,6 +4,7 @@ Gemini Native Audio Adapter
 import json
 import asyncio
 import websockets
+import base64
 from typing import Optional
 
 from app.adapters.base import (
@@ -26,7 +27,12 @@ class GeminiAdapter(BaseModelAdapter):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._audio_sequence = 0
-        self._client_ws = None  # Reference to client WebSocket for error propagation
+        self._client_ws = None
+        self._monitor_task: Optional[asyncio.Task] = None
+        self._monitor_task: Optional[asyncio.Task] = None
+        self._last_audio_time = 0
+        self._last_chunk_time = 0
+        self._turn_open = False
     
     @property
     def id(self) -> str:
@@ -47,9 +53,9 @@ class GeminiAdapter(BaseModelAdapter):
             name=self.name,
             provider=self.provider,
             is_enabled=bool(settings.gemini_api_key),
-            supported_sample_rates=[24000],  # Gemini Native Audio requires 24kHz
+            supported_sample_rates=[16000],  # Gemini Bidi expects 16kHz input
             supported_encodings=["pcm_s16le"],
-            default_sample_rate=24000,  # Must be 24kHz for Gemini
+            default_sample_rate=16000,
             default_encoding="pcm_s16le",
             available_voices=[
                 {"id": "Puck", "name": "Puck", "gender": "Male"},
@@ -102,6 +108,7 @@ class GeminiAdapter(BaseModelAdapter):
             
             # Start receive loop
             self._receive_task = asyncio.create_task(self._receive_loop())
+            self._monitor_task = asyncio.create_task(self._monitor_silence())
             self._status = AdapterStatus.CONNECTED
             
         except Exception as e:
@@ -116,6 +123,12 @@ class GeminiAdapter(BaseModelAdapter):
                 await self._receive_task
             except asyncio.CancelledError:
                 pass
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
         
         if self._ws:
             await self._ws.close()
@@ -128,15 +141,91 @@ class GeminiAdapter(BaseModelAdapter):
         if not self._ws or self._status != AdapterStatus.CONNECTED:
             return
         
+        # Decode audio to check energy (VAD)
+        # Prevent "Keep-Alive" from noisy silence preventing the turn closure
+        try:
+            audio_data = base64.b64decode(audio_base64)
+            # Simple volume check (Mean Absolute Value of 16-bit PCM)
+            # Create array of short ints
+            pcm_shorts = []
+            for i in range(0, len(audio_data), 2):
+                chunk_val = int.from_bytes(audio_data[i:i+2], byteorder='little', signed=True)
+                pcm_shorts.append(abs(chunk_val))
+            
+            avg_amp = sum(pcm_shorts) / len(pcm_shorts) if pcm_shorts else 0
+            
+            # Threshold: 500 is roughly -36dBFS for 16-bit
+            # Adjustable based on env.
+            is_speech = avg_amp > 800 
+            
+            if is_speech:
+                self._last_audio_time = asyncio.get_event_loop().time()
+                self._turn_open = True
+            
+            # print(f"Audio Seq={sequence} Amp={int(avg_amp)} Speech={is_speech}")
+            
+        except Exception as e:
+            print(f"VAD Calc Error: {e}")
+        except Exception as e:
+            print(f"VAD Calc Error: {e}")
+            self._last_audio_time = asyncio.get_event_loop().time() # Fallback
+
+        # Update last chunk time unconditionally for rate limiting
+        self._last_chunk_time = asyncio.get_event_loop().time()
+
         msg = {
             "realtime_input": {
                 "media_chunks": [{
-                    "mime_type": "audio/pcm",
+                    "mime_type": "audio/pcm;rate=16000",
                     "data": audio_base64
                 }]
             }
         }
-        await self._ws.send(json.dumps(msg))
+        try:
+            print(f"Gemini TX chunk seq={sequence} len={len(audio_base64)}")
+        except Exception:
+            pass
+        try:
+            await self._ws.send(json.dumps(msg))
+        except Exception as e:
+            print(f"Gemini send_audio error: {e}")
+
+    async def _monitor_silence(self):
+        """Monitor for silence and send turn_complete to bypass Gemini's long timeout"""
+        while True:
+            try:
+                await asyncio.sleep(0.1)
+                if not self._ws or self._status != AdapterStatus.CONNECTED:
+                    continue
+
+                if self._turn_open:
+                    now = asyncio.get_event_loop().time()
+                    
+                    # Guard: Don't close if we just sent a chunk (wait 200ms grace)
+                    if now - self._last_chunk_time < 0.2:
+                        continue
+
+                    # 1.0s silence threshold
+                    if now - self._last_audio_time > 1.0:
+                        print("Gemini Silence: >1.0s without audio, sending turn_complete")
+                        self._turn_open = False
+                        
+                        # Explicitly tell Gemini the user turn is done
+                        try:
+                            # Send explicit end-of-turn (snake_case)
+                            # User requested realtime_input wrapper
+                            await self._ws.send(json.dumps({
+                                "realtime_input": {
+                                    "turn_complete": True
+                                }
+                            }))
+                        except Exception as e:
+                            print(f"Gemini turn_complete send error: {e}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Silence Monitor Error: {e}")
+                await asyncio.sleep(1)
     
     async def _receive_loop(self) -> None:
         """Background task to receive messages from Gemini"""
@@ -144,11 +233,39 @@ class GeminiAdapter(BaseModelAdapter):
             async for message in self._ws:
                 await self._handle_message(message)
         except websockets.ConnectionClosed as e:
+            print(f"Gemini WS Closed: Code={e.code}, Reason={e.reason}")
             self._status = AdapterStatus.DISCONNECTED
             self._emit_error(4005, f"Connection closed: {e.reason or 'unknown'}")
         except Exception as e:
             self._status = AdapterStatus.ERROR
             self._emit_error(4100, f"Receive error: {str(e)}")
+
+    def _pcm_to_wav_base64(self, audio_b64: str, sample_rate: int = 24000) -> str:
+        pcm_bytes = base64.b64decode(audio_b64)
+        num_channels = 1
+        bits_per_sample = 16
+        byte_rate = sample_rate * num_channels * bits_per_sample // 8
+        block_align = num_channels * bits_per_sample // 8
+        data_size = len(pcm_bytes)
+        chunk_size = 36 + data_size
+        
+        header = b"".join([
+            b"RIFF",
+            chunk_size.to_bytes(4, "little"),
+            b"WAVE",
+            b"fmt ",
+            (16).to_bytes(4, "little"),
+            (1).to_bytes(2, "little"),
+            num_channels.to_bytes(2, "little"),
+            sample_rate.to_bytes(4, "little"),
+            byte_rate.to_bytes(4, "little"),
+            block_align.to_bytes(2, "little"),
+            bits_per_sample.to_bytes(2, "little"),
+            b"data",
+            data_size.to_bytes(4, "little")
+        ])
+        wav_bytes = header + pcm_bytes
+        return base64.b64encode(wav_bytes).decode("ascii")
     
     async def _handle_message(self, message: str) -> None:
         """Handle incoming message from Gemini"""
@@ -159,6 +276,16 @@ class GeminiAdapter(BaseModelAdapter):
                 data = json.loads(message)
             
             content = data.get("serverContent", {})
+            try:
+                if content:
+                    print(f"Gemini RX keys={list(content.keys())}")
+            except Exception:
+                pass
+            
+            # Check for explicit error in serverContent
+            if "error" in content:
+                print(f"Gemini Server Info/Error: {content.get('error')}")
+
             
             # Handle audio output
             if "modelTurn" in content:
@@ -166,8 +293,11 @@ class GeminiAdapter(BaseModelAdapter):
                 for part in parts:
                     if "inlineData" in part:
                         self._audio_sequence += 1
+                        raw_b64 = part["inlineData"]["data"]
+                        # Gemini Native output is 24kHz
+                        wav_b64 = self._pcm_to_wav_base64(raw_b64, sample_rate=24000)
                         self._emit_audio(
-                            part["inlineData"]["data"],
+                            wav_b64,
                             self._audio_sequence,
                             False
                         )
@@ -185,7 +315,10 @@ class GeminiAdapter(BaseModelAdapter):
             
             # Handle turn complete
             if content.get("turnComplete"):
+                self._turn_open = False
                 self._emit_transcription("system", "TURN_COMPLETE", True)
                 
         except json.JSONDecodeError:
             pass
+        except Exception as e:
+            print(f"Gemini handle_message error: {e}")

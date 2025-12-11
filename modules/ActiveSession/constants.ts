@@ -2,7 +2,7 @@
 import { SessionConfig } from "./types";
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
-  sampleRate: 24000, // Gemini Native
+  sampleRate: 16000, // Gemini Native
   bufferThreshold: 15, // ~100ms buffering (was 3)
   volumeThreshold: 10
 };
