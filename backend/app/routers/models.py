@@ -284,8 +284,8 @@ async def generate_image(req: ImageGenerationRequest):
     if not settings.gemini_api_key:
         raise HTTPException(status_code=500, detail="Gemini API Key not configured")
 
-    # Use Imagen 3
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key={settings.gemini_api_key}"
+    # Use Imagen 4 (3.0 not available)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={settings.gemini_api_key}"
 
     async with httpx.AsyncClient() as client:
         try:
