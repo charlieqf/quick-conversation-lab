@@ -128,11 +128,21 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
     setIsGenerating(true);
     setGeneratedConfig(prev => ({ ...prev, description: 'AI 正在分析生成中...' }));
 
-    // Determine Model from Settings
-    // Always use Gemini 2.5 Flash for Scenario Generation (Standard for 2025)
-    const selectedModel = 'gemini-2.5-flash';
+    // Determine Model from Settings (Load from global quick_settings)
+    let selectedModel = 'gemini-2.5-flash';
+    try {
+      const savedSettings = localStorage.getItem('quick_settings');
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed.selectedScenarioModel) {
+          selectedModel = parsed.selectedScenarioModel;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load settings', e);
+    }
 
-    const modelDisplay = 'Gemini 2.5 Flash (Backend)';
+    const modelDisplay = `${selectedModel} (Backend)`;
     addLog(`初始化 AI 模型 (${modelDisplay})...`, 'info');
 
     try {

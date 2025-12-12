@@ -7,12 +7,18 @@ const DEFAULT_SETTINGS: UserSettings = {
   apiKeyConfigured: false,
   apiReady: false,
   selectedModel: 'gemini',
-  selectedVoice: 'Kore'
+  selectedVoice: 'Kore',
+  selectedScenarioModel: 'gemini-2.5-flash'
 };
+
+const SCENARIO_MODELS_FALLBACK: APIModel[] = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google', isEnabled: true, defaultVoice: '', supportsTranscription: false, description: 'Latest fast model (Fallback)' },
+];
 
 export const SettingsModule: React.FC = () => {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [models, setModels] = useState<APIModel[]>([]);
+  const [scenarioModels, setScenarioModels] = useState<APIModel[]>([]);
   const [voices, setVoices] = useState<APIVoice[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [loadingVoices, setLoadingVoices] = useState(false);
@@ -32,7 +38,7 @@ export const SettingsModule: React.FC = () => {
       }
       setSettings(localSettings);
 
-      // Fetch Models
+      // Fetch Voice Models
       try {
         const res = await fetch('/api/models', { cache: 'no-store' }); // Uses proxy
         if (!res.ok) throw new Error('Failed to load models');
@@ -57,6 +63,32 @@ export const SettingsModule: React.FC = () => {
         }
       } catch (e) {
         console.error("Failed to fetch models:", e);
+      }
+
+      // Fetch Scenario Models (New)
+      try {
+        const res = await fetch('/api/models/scenario', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          // Map simple dict to APIModel structure if needed, backend currently returns id, name, description
+          // We need to ensure it matches APIModel interface
+          const formatted: APIModel[] = data.map((m: any) => ({
+            id: m.id,
+            name: m.name,
+            provider: 'Google', // Hardcoded for now as backend only lists Gemini
+            isEnabled: true,
+            defaultVoice: '',
+            supportsTranscription: false,
+            description: m.description,
+            badge: m.badge
+          }));
+          setScenarioModels(formatted);
+        } else {
+          setScenarioModels(SCENARIO_MODELS_FALLBACK);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch scenario models, using fallback", e);
+        setScenarioModels(SCENARIO_MODELS_FALLBACK);
       } finally {
         setLoadingModels(false);
       }
@@ -146,6 +178,25 @@ export const SettingsModule: React.FC = () => {
           models={models}
           isLoading={loadingModels}
         />
+
+        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
+
+        {/* Section 2.5: Scenario Model */}
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
+            场景生成模型 (Scenario Gen)
+            <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] rounded">Text/Multimodal</span>
+          </h3>
+          <ModelSelector
+            selectedModel={settings.selectedScenarioModel || 'gemini-2.5-flash'}
+            onSelect={(id) => updateSettings({ selectedScenarioModel: id })}
+            models={scenarioModels}
+            isLoading={loadingModels}
+          />
+          <p className="text-[10px] text-slate-400 mt-2">
+            用于读取 PDF 和生成场景配置的纯文本/多模态模型。推荐使用 Gemini 2.5 Flash。
+          </p>
+        </div>
 
         <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
 

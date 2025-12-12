@@ -9,7 +9,7 @@ const THEME_CONFIG: Record<string, { bg: string }> = {
   purple: { bg: 'bg-purple-50' },
   orange: { bg: 'bg-orange-50' }
 };
-import { GoogleGenAI } from "@google/genai";
+
 
 interface ConfigTabProps {
   config: ScenarioConfig;
@@ -57,21 +57,34 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
     onLog("开始分析评分标准并提取维度...", 'info');
 
     try {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API Key not found");
-      const ai = new GoogleGenAI({ apiKey });
-
       const prompt = dimensionPromptTemplate.replace('{criteria}', config.scoringCriteria);
 
-      onLog("发送请求至 Wanyi API...", 'info');
+      let selectedModel = 'gemini-2.5-flash';
+      try {
+        const settings = JSON.parse(localStorage.getItem('quick_settings') || '{}');
+        if (settings.selectedScenarioModel) selectedModel = settings.selectedScenarioModel;
+      } catch (e) {
+        console.warn("Failed to load settings", e);
+      }
+      onLog(`发送请求至 Backend API (Model: ${selectedModel})...`, 'info');
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' }
+      const res = await fetch('/api/models/tools/scenario-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          contents: [{ parts: [{ text: prompt }] }],
+          generation_config: { response_mime_type: 'application/json' }
+        })
       });
 
-      const text = response.text || '[]';
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `API Error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const text = data.text || '[]';
       onLog("接收到 API 响应", 'success', text);
 
       const parsed = JSON.parse(text);

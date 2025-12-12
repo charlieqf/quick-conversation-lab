@@ -207,9 +207,29 @@ async def preview_voice(req: PreviewRequest):
         raise HTTPException(status_code=400, detail="Unsupported model for preview")
 
 
+@router.get("/scenario", response_model=List[dict])
+async def list_scenario_models():
+    """List models supported for Scenario Generation (Mirroring Legacy App Options)"""
+    return [
+        { 
+            "id": "gemini-2.5-flash", 
+            "name": "Gemini 2.5 Flash", 
+            "badge": "Fast",
+            "description": "Optimized for speed and efficiency. Best for real-time interactions." 
+        },
+        { 
+            "id": "gemini-3-pro-preview", 
+            "name": "Gemini 3.0 Pro", 
+            "badge": "Smart",
+            "description": "High reasoning capability. Best for complex scenario generation." 
+        }
+    ]
+
+
 class ScenarioRequest(BaseModel):
     contents: List[Dict[str, Any]]
     model: Optional[str] = "gemini-2.5-flash"
+    generation_config: Optional[Dict[str, Any]] = None
 
 @router.post("/tools/scenario-generate")
 async def generate_scenario(req: ScenarioRequest):
@@ -217,15 +237,24 @@ async def generate_scenario(req: ScenarioRequest):
     if not settings.gemini_api_key:
         raise HTTPException(status_code=500, detail="Gemini API Key not configured on server")
 
-    # Use 2.5 Flash as standard
-    model_name = req.model
+    # Use specified model or default to 2.5 Flash
+    model_name = req.model or "gemini-2.5-flash"
+
+    # Direct pass-through (Validated that 2.5/3.0 exist in this environment)
+    if not model_name.startswith("gemini"):
+         raise HTTPException(status_code=400, detail="Only Gemini models are supported for this endpoint")
+    
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
+
+    payload = {"contents": req.contents}
+    if req.generation_config:
+        payload["generation_config"] = req.generation_config
 
     async with httpx.AsyncClient() as client:
         try:
             res = await client.post(
                 url,
-                json={"contents": req.contents},
+                json=payload,
                 timeout=60.0 # Allow longer timeout for generation
             )
             
@@ -245,3 +274,52 @@ async def generate_scenario(req: ScenarioRequest):
             print(f"Scenario Gen Exception: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+
+class ImageGenerationRequest(BaseModel):
+    prompt: str
+
+@router.post("/tools/image-generate")
+async def generate_image(req: ImageGenerationRequest):
+    """Proxy request to Imagen for avatar generation"""
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=500, detail="Gemini API Key not configured")
+
+    # Use Imagen 3
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key={settings.gemini_api_key}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # Imagen API format
+            payload = {
+                "instances": [
+                    { "prompt": req.prompt }
+                ],
+                "parameters": {
+                    "sampleCount": 1,
+                    "aspectRatio": "1:1"
+                }
+            }
+            
+            res = await client.post(
+                url,
+                json=payload,
+                timeout=30.0
+            )
+            
+            if res.status_code != 200:
+                print(f"Imagen Error: {res.text}")
+                raise HTTPException(status_code=res.status_code, detail=f"Imagen Error: {res.text}")
+                
+            data = res.json()
+            # Extract base64 image
+            # Response: { "predictions": [ { "bytesBase64Encoded": "..." } ] }
+            try:
+                b64 = data["predictions"][0]["bytesBase64Encoded"]
+                mime_type = data["predictions"][0].get("mimeType", "image/png")
+                return {"image": f"data:{mime_type};base64,{b64}"}
+            except (KeyError, IndexError):
+                raise HTTPException(status_code=500, detail="Invalid response from Imagen")
+                
+        except Exception as e:
+            print(f"Image Gen Exception: {e}")
+            raise HTTPException(status_code=500, detail=str(e))

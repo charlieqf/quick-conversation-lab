@@ -5,7 +5,7 @@ import { PersonalitySliders } from './components/PersonalitySliders';
 import { DebugConsole } from '../ScenarioEditor/components/DebugConsole'; // Reuse console
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { GoogleGenAI } from "@google/genai";
+
 
 interface RoleEditorModuleProps {
   roleId?: string;
@@ -48,7 +48,7 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
-  
+
   // Settings State for System Prompt
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [generationInstruction, setGenerationInstruction] = useState(DEFAULT_GENERATION_INSTRUCTION);
@@ -93,21 +93,15 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
     addLog('开始构建 System Prompt...', 'info');
 
     try {
-      // 1. Config
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API Key required. Please configure in Settings.");
-      
-      let selectedModel: AIModelId = 'gemini-2.5-flash';
-      // Try to read settings
+      // 1. Config Model
+      // Use User's selected Scenario Model (Text Generation)
+      let selectedModel = 'gemini-2.5-flash';
       try {
-         const settings = JSON.parse(localStorage.getItem('quick_settings') || '{}');
-         if (settings.selectedModel) selectedModel = settings.selectedModel;
-      } catch(e) {}
+        const settings = JSON.parse(localStorage.getItem('quick_settings') || '{}');
+        if (settings.selectedScenarioModel) selectedModel = settings.selectedScenarioModel;
+      } catch (e) { }
 
-      const ai = new GoogleGenAI({ apiKey });
-
-      // 2. Construct Prompt using the dynamic template
-      // Note: role.focusAreas is explicitly included here
+      // 2. Construct Prompt
       const userPrompt = `${generationInstruction}
 
 Context Data:
@@ -120,24 +114,28 @@ Context Data:
 - Key Focus Areas: ${role.focusAreas.join(', ')}
 - Natural Language Description: "${role.description}"
 `;
-      
-      addLog('发送请求至 Wanyi API...', 'info', userPrompt);
 
-      // 3. Call API (Stream)
-      const responseStream = await ai.models.generateContentStream({
-        model: selectedModel,
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }]
+      addLog(`发送请求至 Backend API (Model: ${selectedModel})...`, 'info');
+
+      // 3. Call Backend API
+      const res = await fetch('/api/models/tools/scenario-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          contents: [{ parts: [{ text: userPrompt }] }]
+        })
       });
 
-      let fullText = '';
-      for await (const chunk of responseStream) {
-        if (chunk.text) {
-           fullText += chunk.text;
-        }
+      if (!res.ok) {
+        throw new Error(`API Error: ${res.status}`);
       }
-      
-      addLog('生成完成', 'success', fullText);
-      updateField('systemPromptAddon', fullText.trim());
+
+      const data = await res.json();
+      const text = data.text || '';
+
+      addLog('生成完成', 'success', text);
+      updateField('systemPromptAddon', text.trim());
 
     } catch (e: any) {
       addLog(`生成失败: ${e.message}`, 'error');
@@ -154,14 +152,9 @@ Context Data:
     }
 
     setIsGeneratingAvatar(true);
-    addLog('正在调用 Wanyi Image Gen 生成真实头像...', 'info');
+    addLog('正在请求 Backend 生成真实头像...', 'info');
 
     try {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API Key required. Please configure in Settings.");
-      
-      const ai = new GoogleGenAI({ apiKey });
-      
       // Construct prompt using template and placeholders
       const prompt = avatarPromptTemplate
         .replace(/{name}/g, role.nameCN || '')
@@ -170,29 +163,23 @@ Context Data:
 
       addLog(`Sending Image Generation Request...`, 'info', prompt);
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: prompt }] }
+      const res = await fetch('/api/models/tools/image-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
       });
 
-      let foundImage = false;
-      if (response.candidates?.[0]?.content?.parts) {
-          for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                const base64Data = part.inlineData.data;
-                const mimeType = part.inlineData.mimeType || 'image/png';
-                const imageUrl = `data:${mimeType};base64,${base64Data}`;
-                
-                updateField('avatarImage', imageUrl);
-                addLog('头像生成成功并已保存到角色', 'success');
-                foundImage = true;
-                break;
-            }
-          }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server Error: ${res.status}`);
       }
-      
-      if (!foundImage) {
-          throw new Error("模型未返回图片数据");
+
+      const data = await res.json();
+      if (data.image) {
+        updateField('avatarImage', data.image);
+        addLog('头像生成成功并已保存到角色', 'success');
+      } else {
+        throw new Error("Invalid response from server");
       }
 
     } catch (e: any) {
@@ -211,7 +198,7 @@ Context Data:
 
     const saved = localStorage.getItem('quick_roles');
     let roles: Role[] = saved ? JSON.parse(saved) : [];
-    
+
     if (roleId) {
       roles = roles.map(r => r.id === role.id ? { ...role, lastUpdated: new Date().toISOString() } : r);
     } else {
@@ -247,108 +234,108 @@ Context Data:
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-10">
-        
+
         {/* 1. Identity */}
         <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm space-y-5">
-           <h3 className="text-sm font-bold text-slate-800 flex items-center">
-             <User className="w-4 h-4 mr-2 text-medical-600" /> 基础信息 (Identity)
-           </h3>
+          <h3 className="text-sm font-bold text-slate-800 flex items-center">
+            <User className="w-4 h-4 mr-2 text-medical-600" /> 基础信息 (Identity)
+          </h3>
 
-           {/* Avatar Section */}
-           <div className="flex items-center space-x-4">
-              <div className="w-20 h-20 rounded-full border-2 border-slate-100 shadow-inner overflow-hidden flex-shrink-0 bg-slate-50 relative group">
-                <img src={currentAvatar} alt="Avatar" className="w-full h-full object-cover" />
-                {isGeneratingAvatar && (
-                   <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                   </div>
-                )}
-              </div>
-              
-              <div className="flex flex-col space-y-2">
-                 <div className="flex items-center space-x-1">
-                   <Button 
-                     variant="secondary" 
-                     onClick={handleGenerateAvatar}
-                     isLoading={isGeneratingAvatar}
-                     className="text-xs h-8 px-3"
-                     icon={<ImageIcon className="w-3 h-3" />}
-                   >
-                     生成头像
-                   </Button>
-                   <button
-                      onClick={() => setIsAvatarSettingsOpen(true)}
-                      className="p-1.5 text-slate-400 hover:text-medical-600 hover:bg-slate-100 rounded-md transition-colors"
-                      title="配置头像生成提示词"
-                   >
-                      <Settings className="w-4 h-4" />
-                   </button>
-                 </div>
-                 
-                 <button 
-                   onClick={() => updateField('avatarImage', undefined)} // Reset to dicebear
-                   className="text-[10px] text-slate-400 hover:text-red-500 flex items-center pl-1"
-                 >
-                   <RotateCw className="w-3 h-3 mr-1" /> 重置为卡通头像
-                 </button>
-              </div>
-           </div>
-           
-           <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">中文姓名</label>
-                <input 
-                  type="text" 
-                  value={role.nameCN} 
-                  onChange={(e) => updateField('nameCN', e.target.value)}
-                  className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none" 
-                  placeholder="e.g. 张主任"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">英文代号</label>
-                <input 
-                   type="text" 
-                   value={role.name} 
-                   onChange={(e) => updateField('name', e.target.value)}
-                   className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none" 
-                   placeholder="e.g. Dr. Zhang"
-                />
-              </div>
-           </div>
-           
-           <div>
-              <label className="text-xs text-slate-500 block mb-1">职位/头衔</label>
-              <input 
-                 type="text" 
-                 value={role.title} 
-                 onChange={(e) => updateField('title', e.target.value)}
-                 className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none" 
-                 placeholder="e.g. 心内科主任医师"
-              />
-           </div>
+          {/* Avatar Section */}
+          <div className="flex items-center space-x-4">
+            <div className="w-20 h-20 rounded-full border-2 border-slate-100 shadow-inner overflow-hidden flex-shrink-0 bg-slate-50 relative group">
+              <img src={currentAvatar} alt="Avatar" className="w-full h-full object-cover" />
+              {isGeneratingAvatar && (
+                <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              )}
+            </div>
 
-           <div>
-              <label className="text-xs text-slate-500 block mb-1">主要关注点 (Tags)</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {role.focusAreas.map((tag, i) => (
-                  <span key={i} className="bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded flex items-center">
-                    {tag} <button onClick={() => updateField('focusAreas', role.focusAreas.filter(t => t !== tag))} className="ml-1 text-slate-400">×</button>
-                  </span>
-                ))}
-                <button 
-                  onClick={() => setIsTagModalOpen(true)}
-                  className="bg-medical-50 text-medical-600 text-xs px-2 py-1 rounded border border-dashed border-medical-200 hover:bg-medical-100"
+            <div className="flex flex-col space-y-2">
+              <div className="flex items-center space-x-1">
+                <Button
+                  variant="secondary"
+                  onClick={handleGenerateAvatar}
+                  isLoading={isGeneratingAvatar}
+                  className="text-xs h-8 px-3"
+                  icon={<ImageIcon className="w-3 h-3" />}
                 >
-                  + Add
+                  生成头像
+                </Button>
+                <button
+                  onClick={() => setIsAvatarSettingsOpen(true)}
+                  className="p-1.5 text-slate-400 hover:text-medical-600 hover:bg-slate-100 rounded-md transition-colors"
+                  title="配置头像生成提示词"
+                >
+                  <Settings className="w-4 h-4" />
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400">例如: 治疗费用, 副作用, 依从性。AI 将在对话中重点关注这些方面。</p>
-           </div>
+
+              <button
+                onClick={() => updateField('avatarImage', undefined)} // Reset to dicebear
+                className="text-[10px] text-slate-400 hover:text-red-500 flex items-center pl-1"
+              >
+                <RotateCw className="w-3 h-3 mr-1" /> 重置为卡通头像
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">中文姓名</label>
+              <input
+                type="text"
+                value={role.nameCN}
+                onChange={(e) => updateField('nameCN', e.target.value)}
+                className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none"
+                placeholder="e.g. 张主任"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">英文代号</label>
+              <input
+                type="text"
+                value={role.name}
+                onChange={(e) => updateField('name', e.target.value)}
+                className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none"
+                placeholder="e.g. Dr. Zhang"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">职位/头衔</label>
+            <input
+              type="text"
+              value={role.title}
+              onChange={(e) => updateField('title', e.target.value)}
+              className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 outline-none"
+              placeholder="e.g. 心内科主任医师"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">主要关注点 (Tags)</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {role.focusAreas.map((tag, i) => (
+                <span key={i} className="bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded flex items-center">
+                  {tag} <button onClick={() => updateField('focusAreas', role.focusAreas.filter(t => t !== tag))} className="ml-1 text-slate-400">×</button>
+                </span>
+              ))}
+              <button
+                onClick={() => setIsTagModalOpen(true)}
+                className="bg-medical-50 text-medical-600 text-xs px-2 py-1 rounded border border-dashed border-medical-200 hover:bg-medical-100"
+              >
+                + Add
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">例如: 治疗费用, 副作用, 依从性。AI 将在对话中重点关注这些方面。</p>
+          </div>
         </div>
 
         {/* 2. Personality Sliders */}
-        <PersonalitySliders 
+        <PersonalitySliders
           hostility={role.hostility}
           verbosity={role.verbosity}
           skepticism={role.skepticism}
@@ -357,54 +344,54 @@ Context Data:
 
         {/* 3. Description & AI Generation */}
         <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm space-y-4">
-           <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center">
-                <Sparkles className="w-4 h-4 mr-2 text-purple-600" /> AI 指令生成
-              </h3>
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-1.5 text-slate-400 hover:text-medical-600 hover:bg-slate-50 rounded-lg transition-colors"
-                title="配置生成模板"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
-           </div>
-           
-           <div>
-              <label className="text-xs text-slate-500 block mb-1">自然语言描述 (用于生成指令)</label>
-              <textarea 
-                value={role.description}
-                onChange={(e) => updateField('description', e.target.value)}
-                className="w-full h-20 p-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent resize-none"
-                placeholder="例如：非常老派，讨厌新技术，喜欢打断别人说话..."
+          <div className="flex justify-between items-center">
+            <h3 className="text-sm font-bold text-slate-800 flex items-center">
+              <Sparkles className="w-4 h-4 mr-2 text-purple-600" /> AI 指令生成
+            </h3>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-1.5 text-slate-400 hover:text-medical-600 hover:bg-slate-50 rounded-lg transition-colors"
+              title="配置生成模板"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">自然语言描述 (用于生成指令)</label>
+            <textarea
+              value={role.description}
+              onChange={(e) => updateField('description', e.target.value)}
+              className="w-full h-20 p-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent resize-none"
+              placeholder="例如：非常老派，讨厌新技术，喜欢打断别人说话..."
+            />
+          </div>
+
+          <Button
+            variant="primary"
+            className="w-full"
+            onClick={handleGeneratePrompt}
+            isLoading={isGenerating}
+            icon={<Sparkles className="w-4 h-4" />}
+          >
+            更新 AI 指令 (System Prompt)
+          </Button>
+
+          {role.systemPromptAddon && (
+            <div className="mt-4 animate-in fade-in duration-300">
+              <label className="text-xs text-slate-500 block mb-1">生成的 System Prompt Preview:</label>
+              <textarea
+                value={role.systemPromptAddon}
+                onChange={(e) => updateField('systemPromptAddon', e.target.value)}
+                className="w-full h-32 p-3 text-xs font-mono bg-purple-50/30 border border-purple-100 rounded-lg text-slate-700 leading-relaxed resize-none focus:outline-none focus:border-purple-300"
               />
-           </div>
-
-           <Button 
-             variant="primary" 
-             className="w-full" 
-             onClick={handleGeneratePrompt}
-             isLoading={isGenerating}
-             icon={<Sparkles className="w-4 h-4" />}
-           >
-             更新 AI 指令 (System Prompt)
-           </Button>
-
-           {role.systemPromptAddon && (
-             <div className="mt-4 animate-in fade-in duration-300">
-               <label className="text-xs text-slate-500 block mb-1">生成的 System Prompt Preview:</label>
-               <textarea 
-                  value={role.systemPromptAddon}
-                  onChange={(e) => updateField('systemPromptAddon', e.target.value)}
-                  className="w-full h-32 p-3 text-xs font-mono bg-purple-50/30 border border-purple-100 rounded-lg text-slate-700 leading-relaxed resize-none focus:outline-none focus:border-purple-300"
-               />
-             </div>
-           )}
+            </div>
+          )}
         </div>
 
         {/* 4. Debug Console */}
         <DebugConsole logs={logs} onClear={() => setLogs([])} />
-        
+
         <div className="h-8"></div>
       </div>
 
@@ -422,12 +409,12 @@ Context Data:
       >
         <div className="space-y-3">
           <p className="text-xs text-slate-500">
-             定义 AI 在将您的角色参数转化为 System Prompt 时的逻辑模板。
+            定义 AI 在将您的角色参数转化为 System Prompt 时的逻辑模板。
           </p>
-          <textarea 
-             value={generationInstruction}
-             onChange={(e) => setGenerationInstruction(e.target.value)}
-             className="w-full h-64 p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent text-slate-700 leading-relaxed"
+          <textarea
+            value={generationInstruction}
+            onChange={(e) => setGenerationInstruction(e.target.value)}
+            className="w-full h-64 p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent text-slate-700 leading-relaxed"
           />
         </div>
       </Modal>
@@ -446,12 +433,12 @@ Context Data:
       >
         <div className="space-y-3">
           <p className="text-xs text-slate-500">
-             修改用于生成真实头像的 Prompt 模板。支持变量：<code className="bg-slate-100 px-1 rounded">{`{name}`}</code>, <code className="bg-slate-100 px-1 rounded">{`{title}`}</code>, <code className="bg-slate-100 px-1 rounded">{`{description}`}</code>
+            修改用于生成真实头像的 Prompt 模板。支持变量：<code className="bg-slate-100 px-1 rounded">{`{name}`}</code>, <code className="bg-slate-100 px-1 rounded">{`{title}`}</code>, <code className="bg-slate-100 px-1 rounded">{`{description}`}</code>
           </p>
-          <textarea 
-             value={avatarPromptTemplate}
-             onChange={(e) => setAvatarPromptTemplate(e.target.value)}
-             className="w-full h-64 p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent text-slate-700 leading-relaxed"
+          <textarea
+            value={avatarPromptTemplate}
+            onChange={(e) => setAvatarPromptTemplate(e.target.value)}
+            className="w-full h-64 p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 focus:border-transparent text-slate-700 leading-relaxed"
           />
         </div>
       </Modal>
@@ -470,16 +457,16 @@ Context Data:
       >
         <div className="space-y-3">
           <p className="text-xs text-slate-500">
-             请输入该角色在对话中应重点关注的方面 (例如: "费用敏感", "注重循证", "情绪化")。
+            请输入该角色在对话中应重点关注的方面 (例如: "费用敏感", "注重循证", "情绪化")。
           </p>
-          <input 
-             type="text"
-             value={newTagValue}
-             onChange={(e) => setNewTagValue(e.target.value)}
-             onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag(); }}
-             className="w-full border-b border-slate-200 py-2 text-sm focus:border-medical-500 outline-none"
-             placeholder="输入标签名称..."
-             autoFocus
+          <input
+            type="text"
+            value={newTagValue}
+            onChange={(e) => setNewTagValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag(); }}
+            className="w-full border-b border-slate-200 py-2 text-sm focus:border-medical-500 outline-none"
+            placeholder="输入标签名称..."
+            autoFocus
           />
         </div>
       </Modal>

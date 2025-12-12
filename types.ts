@@ -141,6 +141,7 @@ export interface UserSettings {
   apiReady: boolean; // Flag for Backend connection status
   selectedModel: AIModelId;
   selectedVoice: VoiceId;
+  selectedScenarioModel?: AIModelId; // New field for Scenario Generation (Text/Multimodal)
 }
 
 // --- Session Configuration Types ---
