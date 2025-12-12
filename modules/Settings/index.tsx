@@ -171,17 +171,7 @@ export const SettingsModule: React.FC = () => {
 
         <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
 
-        {/* Section 2: Model */}
-        <ModelSelector
-          selectedModel={settings.selectedModel}
-          onSelect={(id) => updateSettings({ selectedModel: id })}
-          models={models}
-          isLoading={loadingModels}
-        />
-
-        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
-
-        {/* Section 2.5: Scenario Model */}
+        {/* Section 1.5: Scenario Model (Moved to Top) */}
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
             场景生成模型 (Scenario Gen)
@@ -197,6 +187,24 @@ export const SettingsModule: React.FC = () => {
             用于读取 PDF 和生成场景配置的纯文本/多模态模型。推荐使用 Gemini 2.5 Flash。
           </p>
         </div>
+
+        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
+
+        {/* Section 2: Real-time Voice Model */}
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
+            实时语音模型 (Real-time Voice)
+            <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-600 text-[10px] rounded">Audio Native</span>
+          </h3>
+          <ModelSelector
+            selectedModel={settings.selectedModel}
+            onSelect={(id) => updateSettings({ selectedModel: id })}
+            models={models}
+            isLoading={loadingModels}
+          />
+        </div>
+
+        {/* Section 3: Voice (Legacy 2.5 was here, moved up) */}
 
         <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
 

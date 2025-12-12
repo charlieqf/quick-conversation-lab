@@ -27,3 +27,4 @@ backend/venv
 backend/.env
 materials
 .firebase/
+*.db

@@ -65,6 +65,7 @@ class RoleBase(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 class RoleCreate(RoleBase):
+    personality: Optional[Dict[str, int]] = None
     # For creation, we accept flattened fields too to match frontend (optional)
     hostility: Optional[int] = 50
     verbosity: Optional[int] = 50

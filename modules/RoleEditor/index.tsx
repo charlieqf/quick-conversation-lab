@@ -62,16 +62,31 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
   const [newTagValue, setNewTagValue] = useState('');
 
   useEffect(() => {
-    if (roleId) {
-      const saved = localStorage.getItem('quick_roles');
-      if (saved) {
-        const roles: Role[] = JSON.parse(saved);
-        const found = roles.find(r => r.id === roleId);
-        if (found) setRole(found);
+    const fetchRole = async () => {
+      if (!roleId) {
+        setRole({ ...DEFAULT_ROLE, id: Date.now().toString() }); // Temp ID for new role
+        return;
       }
-    } else {
-      setRole({ ...DEFAULT_ROLE, id: Date.now().toString() });
-    }
+
+      try {
+        const res = await fetch(`/api/data/roles/${roleId}`);
+        if (!res.ok) throw new Error("Failed to load role");
+        const data = await res.json();
+        // Determine personality from flattened fields or nested object
+        const p = data.personality || {};
+        setRole({
+          ...data,
+          hostility: p.hostility ?? data.hostility ?? 50,
+          verbosity: p.verbosity ?? data.verbosity ?? 50,
+          skepticism: p.skepticism ?? data.skepticism ?? 50
+        });
+      } catch (e) {
+        console.error(e);
+        addLog("无法加载角色数据", 'error');
+      }
+    };
+
+    fetchRole();
   }, [roleId]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info', detail?: string) => {
@@ -190,23 +205,29 @@ Context Data:
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!role.nameCN) {
       alert("请输入中文姓名");
       return;
     }
 
-    const saved = localStorage.getItem('quick_roles');
-    let roles: Role[] = saved ? JSON.parse(saved) : [];
+    try {
+      const url = roleId ? `/api/data/roles/${roleId}` : '/api/data/roles';
+      const method = roleId ? 'PUT' : 'POST';
 
-    if (roleId) {
-      roles = roles.map(r => r.id === role.id ? { ...role, lastUpdated: new Date().toISOString() } : r);
-    } else {
-      roles.push({ ...role, lastUpdated: new Date().toISOString() });
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(role)
+      });
+
+      if (!res.ok) throw new Error("Save failed");
+
+      onBack();
+    } catch (e) {
+      console.error(e);
+      alert("保存失败，请检查网络或控制台");
     }
-
-    localStorage.setItem('quick_roles', JSON.stringify(roles));
-    onBack();
   };
 
   const handleAddTag = () => {
