@@ -142,6 +142,10 @@ export interface UserSettings {
   selectedModel: AIModelId;
   selectedVoice: VoiceId;
   selectedScenarioModel?: AIModelId; // New field for Scenario Generation (Text/Multimodal)
+  customApiKey?: string; // Google/Gemini Key
+  customOpenaiKey?: string;
+  customDoubaoKey?: string;
+  customQwenKey?: string;
 }
 
 // --- Session Configuration Types ---

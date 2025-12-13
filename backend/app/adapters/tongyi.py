@@ -31,12 +31,12 @@ class TongyiAdapter(BaseModelAdapter):
 
     @property
     def capabilities(self) -> ModelCapabilities:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
+        # Allow BYOK
         return ModelCapabilities(
             id=self.id,
             name=self.name,
             provider=self.provider,
-            is_enabled=bool(api_key),
+            is_enabled=True,
             supported_sample_rates=[16000],
             supported_encodings=["pcm_s16le"],
             default_sample_rate=16000,
@@ -50,10 +50,10 @@ class TongyiAdapter(BaseModelAdapter):
         )
 
     async def connect(self, config: SessionConfig) -> None:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
+        api_key = config.api_key or os.getenv("DASHSCOPE_API_KEY")
         if not api_key:
             self._status = AdapterStatus.ERROR
-            self._emit_error(4001, "DashScope API key not configured")
+            self._emit_error(4001, "DashScope API key not configured (Server or User)")
             return
 
         # Standard DashScope realtime endpoint; change to dashscope-intl if needed.

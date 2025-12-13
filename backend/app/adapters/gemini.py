@@ -48,11 +48,17 @@ class GeminiAdapter(BaseModelAdapter):
     
     @property
     def capabilities(self) -> ModelCapabilities:
+        # If server side key is missing, we still report as enabled IF we want to allow users to bring their own key.
+        # However, list_models doesn't know about user key.
+        # We'll default to True if server key exists, OR True generally if we assume client might have it?
+        # Safe bet: If server key is missing, is_enabled = False. 
+        # But wait, if we want to support BYOK, we should report True and fail connection later?
+        # Let's trust that if the user restores this feature they will provide a key. 
         return ModelCapabilities(
             id=self.id,
             name=self.name,
             provider=self.provider,
-            is_enabled=bool(settings.gemini_api_key),
+            is_enabled=True, # Allow BYOK. Validated in connect.
             supported_sample_rates=[16000],  # Gemini Bidi expects 16kHz input
             supported_encodings=["pcm_s16le"],
             default_sample_rate=16000,
@@ -72,15 +78,18 @@ class GeminiAdapter(BaseModelAdapter):
     
     async def connect(self, config: SessionConfig) -> None:
         """Connect to Gemini WebSocket API"""
-        if not settings.gemini_api_key:
+        # Prioritize User Key -> Server Key
+        api_key = config.api_key or settings.gemini_api_key
+        
+        if not api_key:
             self._status = AdapterStatus.ERROR
-            self._emit_error(4001, "Gemini API key not configured")
+            self._emit_error(4001, "Gemini API key not configured (Server or User)")
             return
         
         self._status = AdapterStatus.CONNECTING
         
         try:
-            url = f"{self.WS_URL}?key={settings.gemini_api_key}"
+            url = f"{self.WS_URL}?key={api_key}"
             self._ws = await websockets.connect(url)
             
             # Send setup message

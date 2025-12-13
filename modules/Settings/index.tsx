@@ -194,6 +194,73 @@ export const SettingsModule: React.FC = () => {
       </div>
 
       <div className="p-4">
+        {/* Section 0: API Keys (BYOK) */}
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">Custom API Keys (Optional)</h3>
+          <div className="bg-white border rounded-lg p-3 space-y-3">
+
+            {/* Google Gemini */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">Google Gemini (API Key)</label>
+              <input
+                type="password"
+                value={settings.customApiKey || ''}
+                onChange={(e) => setSettings(prev => ({ ...prev, customApiKey: e.target.value }))}
+                onBlur={() => updateSettings({ customApiKey: settings.customApiKey })}
+                placeholder="AIza..."
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono bg-slate-50"
+              />
+            </div>
+
+            {/* OpenAI */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">OpenAI (sk-...)</label>
+              <input
+                type="password"
+                value={settings.customOpenaiKey || ''}
+                onChange={(e) => setSettings(prev => ({ ...prev, customOpenaiKey: e.target.value }))}
+                onBlur={() => updateSettings({ customOpenaiKey: settings.customOpenaiKey })}
+                placeholder="sk-..."
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono bg-slate-50"
+              />
+            </div>
+
+            {/* Doubao */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">ByteDance Doubao (Volcengine Key)</label>
+              <input
+                type="password"
+                value={settings.customDoubaoKey || ''}
+                onChange={(e) => setSettings(prev => ({ ...prev, customDoubaoKey: e.target.value }))}
+                onBlur={() => updateSettings({ customDoubaoKey: settings.customDoubaoKey })}
+                placeholder="Standard API Key"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono bg-slate-50"
+              />
+            </div>
+
+            {/* Qwen */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">Alibaba Qwen (DashScope Key)</label>
+              <input
+                type="password"
+                value={settings.customQwenKey || ''}
+                onChange={(e) => setSettings(prev => ({ ...prev, customQwenKey: e.target.value }))}
+                onBlur={() => updateSettings({ customQwenKey: settings.customQwenKey })}
+                placeholder="sk-..."
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono bg-slate-50"
+              />
+            </div>
+
+            <p className="text-[10px] text-slate-400 pt-1">
+              Changes are saved automatically when you leave the field (lose focus).
+              <br />
+              Keys are stored securely in your database user profile.
+            </p>
+          </div>
+        </div>
+
+        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
+
         {/* Section 1: Connection */}
         {/* We reuse ConnectionStatus but with different logic or just hide it if unnecessary? 
             PRD says we should show connection status. 

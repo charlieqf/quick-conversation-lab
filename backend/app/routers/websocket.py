@@ -10,6 +10,8 @@ from typing import Optional
 from app.adapters.base import SessionConfig, AudioConfig, VoiceConfig, AdapterStatus
 from app.config import settings
 from ..registry import ADAPTERS
+from ..database import SessionLocal
+from ..models import User
 
 router = APIRouter()
 
@@ -194,6 +196,28 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                     print(f"WS Warning: Invalid voice '{requested_voice_id}' for model {model_id}. Using default '{cap.default_voice}'")
                     final_voice_id = cap.default_voice
 
+                # Fetch User API Key Override (if any)
+                user_api_key = None
+                try:
+                    with SessionLocal() as db:
+                        # Assuming single user 'admin' for now, consistent with users.py
+                        user = db.query(User).filter(User.username == "admin").first()
+                        if user and user.settings:
+                            # Map model_id to specific user setting key
+                            if model_id.startswith("gemini"):
+                                user_api_key = user.settings.get("customApiKey") # Classic name
+                            elif model_id.startswith("openai"):
+                                user_api_key = user.settings.get("customOpenaiKey")
+                            elif model_id.startswith("doubao"):
+                                user_api_key = user.settings.get("customDoubaoKey")
+                            elif model_id.startswith("tongyi"):
+                                user_api_key = user.settings.get("customQwenKey")
+
+                            if user_api_key:
+                                print(f"WS Info: Using User Custom API Key for {model_id}")
+                except Exception as e:
+                    print(f"WS Error fetching user settings: {e}")
+
                 config = SessionConfig(
                     model_id=model_id,
                     audio=AudioConfig(
@@ -206,7 +230,8 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                         language=payload.get("voice", {}).get("language", "zh-CN")
                     ),
                     system_instruction=payload.get("session", {}).get("systemInstruction", ""),
-                    max_duration=payload.get("session", {}).get("maxDuration", 600)
+                    max_duration=payload.get("session", {}).get("maxDuration", 600),
+                    api_key=user_api_key
                 )
                 
                 print(f"WS Info: Connecting adapter {model_id}...")

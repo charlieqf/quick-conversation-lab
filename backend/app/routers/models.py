@@ -1,7 +1,10 @@
 """
 Models API Router - List and get model capabilities
 """
-from fastapi import APIRouter, HTTPException, Response, Body
+from fastapi import APIRouter, HTTPException, Response, Body, Depends
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..models import User
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import httpx
@@ -12,6 +15,13 @@ import json
 from app.config import settings
 from app.adapters.base import ModelCapabilities
 from app.adapters.gemini import GeminiAdapter
+
+def get_user_api_key(db: Session) -> Optional[str]:
+    # Assuming single user 'admin' for MVP
+    user = db.query(User).filter(User.username == "admin").first()
+    if user and user.settings and "customApiKey" in user.settings:
+        return user.settings["customApiKey"]
+    return None
 
 router = APIRouter()
 
@@ -232,10 +242,13 @@ class ScenarioRequest(BaseModel):
     generation_config: Optional[Dict[str, Any]] = None
 
 @router.post("/tools/scenario-generate")
-async def generate_scenario(req: ScenarioRequest):
+async def generate_scenario(req: ScenarioRequest, db: Session = Depends(get_db)):
     """Proxy request to Gemini for scenario generation (secures API Key)"""
-    if not settings.gemini_api_key:
-        raise HTTPException(status_code=500, detail="Gemini API Key not configured on server")
+    user_key = get_user_api_key(db)
+    api_key = user_key or settings.gemini_api_key
+
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Gemini API Key not configured on server or in user settings")
 
     # Use specified model or default to 2.5 Flash
     model_name = req.model or "gemini-2.5-flash"
@@ -244,7 +257,7 @@ async def generate_scenario(req: ScenarioRequest):
     if not model_name.startswith("gemini"):
          raise HTTPException(status_code=400, detail="Only Gemini models are supported for this endpoint")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
     payload = {"contents": req.contents}
     if req.generation_config:
@@ -279,13 +292,16 @@ class ImageGenerationRequest(BaseModel):
     prompt: str
 
 @router.post("/tools/image-generate")
-async def generate_image(req: ImageGenerationRequest):
+async def generate_image(req: ImageGenerationRequest, db: Session = Depends(get_db)):
     """Proxy request to Imagen for avatar generation"""
-    if not settings.gemini_api_key:
+    user_key = get_user_api_key(db)
+    api_key = user_key or settings.gemini_api_key
+
+    if not api_key:
         raise HTTPException(status_code=500, detail="Gemini API Key not configured")
 
     # Use Imagen 4 (3.0 not available)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={settings.gemini_api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={api_key}"
 
     async with httpx.AsyncClient() as client:
         try:

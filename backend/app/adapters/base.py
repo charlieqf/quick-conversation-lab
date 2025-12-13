@@ -37,6 +37,7 @@ class SessionConfig:
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     system_instruction: str = ""
     max_duration: int = 600  # seconds
+    api_key: Optional[str] = None # User override
 
 
 @dataclass

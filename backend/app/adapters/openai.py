@@ -34,12 +34,12 @@ class OpenAIAdapter(BaseModelAdapter):
     
     @property
     def capabilities(self) -> ModelCapabilities:
-        api_key = settings.openai_api_key
+        # Allow BYOK
         return ModelCapabilities(
             id=self.id,
             name=self.name,
             provider=self.provider,
-            is_enabled=bool(api_key),
+            is_enabled=True,
             supported_sample_rates=[24000], 
             supported_encodings=["pcm_s16le"], 
             default_sample_rate=24000,
@@ -60,10 +60,10 @@ class OpenAIAdapter(BaseModelAdapter):
         )
 
     async def connect(self, config: SessionConfig) -> None:
-        api_key = settings.openai_api_key
+        api_key = config.api_key or settings.openai_api_key
         if not api_key:
             self._status = AdapterStatus.ERROR
-            self._emit_error(4001, "OpenAI API key not configured")
+            self._emit_error(4001, "OpenAI API key not configured (Server or User)")
             return
         
         url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
