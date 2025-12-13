@@ -23,20 +23,33 @@ export const SettingsModule: React.FC = () => {
   const [loadingModels, setLoadingModels] = useState(true);
   const [loadingVoices, setLoadingVoices] = useState(false);
 
-  // 1. Initial Load: Settings from LocalStorage & Fetch Models
+  // 1. Initial Load: Settings from API & Fetch Models
   useEffect(() => {
     const loadSettingsAndModels = async () => {
-      // Load Local Settings
-      const saved = localStorage.getItem('quick_settings');
-      let localSettings = DEFAULT_SETTINGS;
-      if (saved) {
-        try {
-          localSettings = JSON.parse(saved);
-        } catch (e) {
-          console.error('Failed to parse settings', e);
+      // Load Settings from API
+      let apiSettings = {};
+      try {
+        const res = await fetch('/api/users/profile', { cache: 'no-store' });
+        if (res.ok) {
+          const profile = await res.json();
+          apiSettings = profile.settings || {};
         }
+      } catch (e) {
+        console.error('Failed to load user profile settings', e);
       }
-      setSettings(localSettings);
+
+      const loadedSettings = {
+        ...DEFAULT_SETTINGS,
+        ...apiSettings
+      };
+
+      // Ensure we preserve fields that might map differently or exist
+      // The API settings key names match our UserSettings interface keys roughly
+      // We need to cast or map them.
+      // API: { selectedModel: "...", selectedVoice: "...", selectedScenarioModel: "..." }
+      // Frontend: same.
+
+      setSettings(prev => ({ ...prev, ...loadedSettings }));
 
       // Fetch Voice Models
       try {
@@ -50,13 +63,14 @@ export const SettingsModule: React.FC = () => {
 
         // If current selected model is not in list (or empty), pick first available
         if (data.length > 0) {
-          const currentExists = data.find(m => m.id === localSettings.selectedModel);
+          const currentExists = data.find(m => m.id === loadedSettings.selectedModel);
           if (!currentExists) {
             const defaultModel = data.find(m => m.isEnabled) || data[0];
             // Update settings immediately if model changed due to availability
-            const newSettings = { ...localSettings, selectedModel: defaultModel.id, apiReady: isReady };
+            const newSettings = { ...loadedSettings, selectedModel: defaultModel.id, apiReady: isReady };
             setSettings(newSettings);
-            localStorage.setItem('quick_settings', JSON.stringify(newSettings));
+            // Auto-save the fix
+            updateSettings({ selectedModel: defaultModel.id });
           } else {
             setSettings(prev => ({ ...prev, apiReady: isReady }));
           }
@@ -134,14 +148,35 @@ export const SettingsModule: React.FC = () => {
   }, [settings.selectedModel, models]);
 
   // Save Settings when changed
-  const updateSettings = (updates: Partial<UserSettings>) => {
+  const updateSettings = async (updates: Partial<UserSettings>) => {
     setSettings(prev => {
       const next = { ...prev, ...updates };
-      // Don't save transient flags if any (apiReady is derived usually, but here we can stick it for now or ignore)
-      // Actually we just save everything relevant
-      localStorage.setItem('quick_settings', JSON.stringify(next));
       return next;
     });
+
+    try {
+      // 1. Fetch current profile settings to merge (safe update)
+      const resGet = await fetch('/api/users/profile');
+      let currentSettings = {};
+      if (resGet.ok) {
+        const p = await resGet.json();
+        currentSettings = p.settings || {};
+      }
+
+      // 2. Push update
+      await fetch('/api/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: {
+            ...currentSettings,
+            ...updates
+          }
+        })
+      });
+    } catch (e) {
+      console.error("Failed to save settings to API", e);
+    }
   };
 
   const handleRefreshToken = () => {

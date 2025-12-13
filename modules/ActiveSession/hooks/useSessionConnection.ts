@@ -137,18 +137,18 @@ Do not break character. Speak Chinese.
     log(`Context Loaded: ${role.nameCN} in ${scenario.subtitle}`, 'info');
 
     try {
-      // 1. Load User Settings (Model & Voice)
-      const settingsStr = localStorage.getItem('quick_settings');
+      // 1. Load User Settings (Model & Voice) from API
       let userSettings = { selectedModel: 'gemini', selectedVoice: 'Kore' };
-      if (settingsStr) {
-        try {
-          const parsed = JSON.parse(settingsStr);
-          // Simple validation/fallback
-          if (parsed.selectedModel) userSettings.selectedModel = parsed.selectedModel;
-          if (parsed.selectedVoice) userSettings.selectedVoice = parsed.selectedVoice;
-        } catch (e) {
-          log('Failed to parse user settings, using defaults', 'error');
+      try {
+        const res = await fetch('/api/users/profile');
+        if (res.ok) {
+          const profile = await res.json();
+          const s = profile.settings || {};
+          if (s.selectedModel) userSettings.selectedModel = s.selectedModel;
+          if (s.selectedVoice) userSettings.selectedVoice = s.selectedVoice;
         }
+      } catch (e) {
+        log('Failed to load user settings from API, using defaults', 'error');
       }
 
       log(`Connecting with Model: ${userSettings.selectedModel}, Voice: ${userSettings.selectedVoice}`, 'info');

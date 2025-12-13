@@ -54,34 +54,42 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
 
   // Load existing data if editing
   useEffect(() => {
-    if (scenarioId) {
-      const saved = localStorage.getItem('quick_scenarios');
-      if (saved) {
+    const loadScenario = async () => {
+      if (scenarioId) {
+        setIsGenerating(true); // Re-use spinner or add a loading state
         try {
-          const scenarios = JSON.parse(saved);
-          const found = scenarios.find((s: any) => s.id === scenarioId);
-          if (found) {
+          const res = await fetch(`/api/data/scenarios/${scenarioId}`);
+          if (res.ok) {
+            const found = await res.json();
             setGeneratedConfig({
               title: found.title || '',
               subtitle: found.subtitle || '',
               description: found.description || '',
               tags: found.tags || [],
               theme: found.theme || 'blue',
-              // Fallback for legacy data (arrays) to strings
-              workflow: Array.isArray(found.workflow) ? found.workflow.join('\n') : (found.workflow || ''),
-              knowledgePoints: Array.isArray(found.knowledgePoints) ? found.knowledgePoints.join('\n') : (found.knowledgePoints || ''),
-              scoringCriteria: Array.isArray(found.scoringCriteria) ? found.scoringCriteria.map((i: any) => `${i.criteria} (${i.points}pts)`).join('\n') : (found.scoringCriteria || ''),
+              workflow: found.workflow || '',
+              knowledgePoints: found.knowledgePoints || '',
+              scoringCriteria: found.scoringCriteria || '',
               scoringDimensions: found.scoringDimensions || []
             });
             if (found.scriptContent) {
               setScriptContent(found.scriptContent);
             }
+            if (found.generationPrompt) {
+              setSystemPrompt(found.generationPrompt);
+            }
+          } else {
+            addLog('加载场景失败: ' + res.statusText, 'error');
           }
         } catch (e) {
           console.error("Failed to load scenario data", e);
+          addLog('加载场景失败', 'error');
+        } finally {
+          setIsGenerating(false);
         }
       }
-    }
+    };
+    loadScenario();
   }, [scenarioId]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info', detail?: string) => {
@@ -128,14 +136,14 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
     setIsGenerating(true);
     setGeneratedConfig(prev => ({ ...prev, description: 'AI 正在分析生成中...' }));
 
-    // Determine Model from Settings (Load from global quick_settings)
+    // Determine Model from Settings (Load from API)
     let selectedModel = 'gemini-2.5-flash';
     try {
-      const savedSettings = localStorage.getItem('quick_settings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        if (parsed.selectedScenarioModel) {
-          selectedModel = parsed.selectedScenarioModel;
+      const res = await fetch('/api/users/profile');
+      if (res.ok) {
+        const p = await res.json();
+        if (p.settings?.selectedScenarioModel) {
+          selectedModel = p.settings.selectedScenarioModel;
         }
       }
     } catch (e) {
@@ -267,27 +275,42 @@ ${scriptContent}
     }
   };
 
-  const handleSave = () => {
-    const saved = localStorage.getItem('quick_scenarios');
-    let scenarios = saved ? JSON.parse(saved) : [];
-
-    const newScenario = {
-      id: scenarioId || Date.now().toString(),
+  const handleSave = async () => {
+    const payload = {
       ...generatedConfig,
       scriptContent: scriptContent,
-      lastUpdated: new Date().toISOString()
+      generationPrompt: systemPrompt
     };
 
-    if (scenarioId) {
-      scenarios = scenarios.map((s: any) => s.id === scenarioId ? newScenario : s);
-    } else {
-      scenarios.unshift(newScenario);
+    try {
+      addLog('正在保存场景...', 'info');
+      let method = 'POST';
+      let url = '/api/data/scenarios';
+
+      if (scenarioId) {
+        method = 'PUT';
+        url = `/api/data/scenarios/${scenarioId}`;
+      }
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const saved = await res.json();
+      addLog('场景已成功保存到云端数据库。', 'success', `ID: ${saved.id}`);
+
+      setTimeout(onBack, 1000);
+    } catch (e: any) {
+      console.error(e);
+      addLog('保存失败: ' + e.message, 'error');
+      alert('保存失败: ' + e.message);
     }
-
-    localStorage.setItem('quick_scenarios', JSON.stringify(scenarios));
-    addLog('场景已保存到本地存储。', 'success');
-
-    setTimeout(onBack, 1000);
   };
 
   return (

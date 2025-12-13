@@ -20,19 +20,61 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>('scenarios');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  
-  // User Profile State
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('quick_user_profile');
-    return saved ? JSON.parse(saved) : DEFAULT_USER_PROFILE;
-  });
 
-  // To handle resuming sessions or viewing specific reports
-  const [lastReportData, setLastReportData] = useState<SessionReportData | null>(null);
-  
-  const handleUpdateProfile = (profile: UserProfile) => {
+  // User Profile State
+  const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
+
+  // Load Profile from API on mount
+  React.useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch('/api/users/profile');
+        if (res.ok) {
+          const data = await res.json();
+          setUserProfile({
+            name: data.username,
+            avatarPrompt: data.settings?.avatarPrompt || DEFAULT_USER_PROFILE.avatarPrompt
+          });
+        }
+      } catch (e) {
+        console.error("Failed to load user profile", e);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  const handleUpdateProfile = async (profile: UserProfile) => {
+    // Optimistic Update
     setUserProfile(profile);
-    localStorage.setItem('quick_user_profile', JSON.stringify(profile));
+
+    try {
+      // We need to fetch current settings first to not overwrite them, or we assume backend merges? 
+      // Backend replaces the settings dict if provided. We should probably merge in frontend or backend.
+      // For safely, let's just do a shallow merge if we had more settings.
+      // But here we can't easily access other settings without fetching or lifting state.
+      // STRATEGY: Fetch current profile to get settings, then update.
+      const resVal = await fetch('/api/users/profile');
+      let currentSettings = {};
+      if (resVal.ok) {
+        const d = await resVal.json();
+        currentSettings = d.settings || {};
+      }
+
+      await fetch('/api/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: profile.name,
+          settings: {
+            ...currentSettings,
+            avatarPrompt: profile.avatarPrompt
+          }
+        })
+      });
+    } catch (e) {
+      console.error("Failed to save profile", e);
+      alert("保存个人资料失败");
+    }
   };
 
   // Unified navigation handler
@@ -47,65 +89,75 @@ const App: React.FC = () => {
       // Pass the selected role ID to session
       setSelectedRoleId(id || null);
     }
-    
+
     setCurrentView(view);
   };
 
-  const handleSessionComplete = (data: SessionReportData) => {
-    setLastReportData(data);
-    
-    // Save to History (LocalStorage Persistence)
-    const existingHistoryStr = localStorage.getItem('quick_sessions');
-    let history: SessionReportData[] = existingHistoryStr ? JSON.parse(existingHistoryStr) : [];
-    
-    const existingIndex = history.findIndex(h => h.id === data.id);
-    if (existingIndex >= 0) {
-      history[existingIndex] = data;
-    } else {
-      history.push(data);
+  const handleSessionComplete = async (data: SessionReportData) => {
+    // Save to Backend
+    try {
+      const res = await fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+
+      if (res.ok) {
+        const savedSession = await res.json();
+        setLastReportData(savedSession);
+        setCurrentView('report');
+      } else {
+        console.error("Failed to save session", await res.text());
+        // Fallback: still show report but warn?
+        setLastReportData(data);
+        setCurrentView('report');
+        alert("保存会话失败，请检查网络连接");
+      }
+    } catch (e) {
+      console.error("Failed to save session", e);
+      setLastReportData(data);
+      setCurrentView('report');
+      alert("保存会话失败，请检查网络连接");
     }
-    
-    localStorage.setItem('quick_sessions', JSON.stringify(history));
-    setCurrentView('report');
   };
 
   const handleViewHistoryReport = (data: SessionReportData) => {
     setLastReportData(data);
     setCurrentView('report');
   };
-  
+
   const handleResumeSession = (data: SessionReportData) => {
-      // Resume logic if needed
-      setSelectedScenarioId(data.scenarioId);
-      setSelectedRoleId(data.roleId);
-      setCurrentView('session');
+    // Resume logic if needed
+    setSelectedScenarioId(data.scenarioId);
+    setSelectedRoleId(data.roleId);
+    setCurrentView('session');
   };
 
   return (
     <div className="h-screen w-full bg-slate-50 font-sans text-slate-900 flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl border-x border-slate-200">
-      
+
       {/* Main Content Area - Scrollable */}
       <main className="flex-1 overflow-y-auto no-scrollbar scroll-smooth bg-slate-50 relative">
-        
+
         {/* Module: Scenario Selection */}
         {currentView === 'scenarios' && (
-          <ScenarioSelectionModule 
+          <ScenarioSelectionModule
             userProfile={userProfile}
-            onNavigate={(view, id) => handleNavigation(view, id)} 
+            onNavigate={(view, id) => handleNavigation(view, id)}
           />
         )}
-        
+
         {/* Module: Scenario Editor */}
         {currentView === 'editor' && (
-          <ScenarioEditorModule 
+          <ScenarioEditorModule
             scenarioId={selectedScenarioId || undefined}
-            onBack={() => setCurrentView('scenarios')} 
+            onBack={() => setCurrentView('scenarios')}
           />
         )}
 
         {/* Module: Role Selection */}
         {currentView === 'roles' && (
-          <RoleSelectionModule 
+          <RoleSelectionModule
             scenarioId={selectedScenarioId || undefined}
             onBack={() => setCurrentView('scenarios')}
             onNavigate={(view, id) => handleNavigation(view, id)}
@@ -114,7 +166,7 @@ const App: React.FC = () => {
 
         {/* Module: Role Editor */}
         {currentView === 'role-editor' && (
-          <RoleEditorModule 
+          <RoleEditorModule
             roleId={selectedRoleId || undefined}
             onBack={() => setCurrentView('roles')}
           />
@@ -122,7 +174,7 @@ const App: React.FC = () => {
 
         {/* Module: Active Session */}
         {currentView === 'session' && selectedScenarioId && selectedRoleId && (
-          <ActiveSessionModule 
+          <ActiveSessionModule
             scenarioId={selectedScenarioId}
             roleId={selectedRoleId}
             onExit={() => setCurrentView('scenarios')}
@@ -132,19 +184,19 @@ const App: React.FC = () => {
 
         {/* Module: Report */}
         {currentView === 'report' && lastReportData && (
-          <ReportModule 
+          <ReportModule
             data={lastReportData}
             onExit={() => setCurrentView('history')}
             onRetry={() => {
-               // Re-enter session with same context
-               handleResumeSession(lastReportData);
-            }} 
+              // Re-enter session with same context
+              handleResumeSession(lastReportData);
+            }}
           />
         )}
 
         {/* Module: History */}
         {currentView === 'history' && (
-          <HistoryModule 
+          <HistoryModule
             userProfile={userProfile}
             onUpdateProfile={handleUpdateProfile}
             onViewReport={handleViewHistoryReport}
@@ -161,37 +213,34 @@ const App: React.FC = () => {
       {/* Bottom Navigation Bar (Mobile Style) */}
       {(currentView === 'scenarios' || currentView === 'settings' || currentView === 'history') && (
         <nav className="bg-white border-t border-slate-200 h-16 flex-shrink-0 flex items-center justify-around px-2 pb-safe shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 animate-in slide-in-from-bottom duration-300">
-          <button 
+          <button
             onClick={() => handleNavigation('scenarios')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              currentView === 'scenarios'
-                ? 'text-medical-600' 
-                : 'text-slate-400 hover:text-slate-600'
-            }`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === 'scenarios'
+              ? 'text-medical-600'
+              : 'text-slate-400 hover:text-slate-600'
+              }`}
           >
             <BookOpen className="w-6 h-6" strokeWidth={currentView === 'scenarios' ? 2.5 : 2} />
             <span className="text-[10px] font-medium">演练</span>
           </button>
 
-          <button 
+          <button
             onClick={() => setCurrentView('history')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              currentView === 'history'
-                ? 'text-medical-600' 
-                : 'text-slate-400 hover:text-slate-600'
-            }`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === 'history'
+              ? 'text-medical-600'
+              : 'text-slate-400 hover:text-slate-600'
+              }`}
           >
             <Users className="w-6 h-6" strokeWidth={currentView === 'history' ? 2.5 : 2} />
             <span className="text-[10px] font-medium">我的</span>
           </button>
 
-          <button 
+          <button
             onClick={() => handleNavigation('settings')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              currentView === 'settings' 
-                ? 'text-medical-600' 
-                : 'text-slate-400 hover:text-slate-600'
-            }`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === 'settings'
+              ? 'text-medical-600'
+              : 'text-slate-400 hover:text-slate-600'
+              }`}
           >
             <Settings className="w-6 h-6" strokeWidth={currentView === 'settings' ? 2.5 : 2} />
             <span className="text-[10px] font-medium">设置</span>

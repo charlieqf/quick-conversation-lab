@@ -61,8 +61,11 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
 
       let selectedModel = 'gemini-2.5-flash';
       try {
-        const settings = JSON.parse(localStorage.getItem('quick_settings') || '{}');
-        if (settings.selectedScenarioModel) selectedModel = settings.selectedScenarioModel;
+        const res = await fetch('/api/users/profile');
+        if (res.ok) {
+          const p = await res.json();
+          if (p.settings?.selectedScenarioModel) selectedModel = p.settings.selectedScenarioModel;
+        }
       } catch (e) {
         console.warn("Failed to load settings", e);
       }

@@ -63,23 +63,53 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
    const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
 
    // Load saved prompt or default
-   const [evalPromptTemplate, setEvalPromptTemplate] = useState(() => {
-      return localStorage.getItem('quick_eval_prompt') || DEFAULT_EVAL_PROMPT;
-   });
+   const [evalPromptTemplate, setEvalPromptTemplate] = useState(DEFAULT_EVAL_PROMPT);
+
+   // Load Prompt from API
+   useEffect(() => {
+      const loadSettings = async () => {
+         try {
+            const res = await fetch('/api/users/profile');
+            if (res.ok) {
+               const profile = await res.json();
+               if (profile.settings && profile.settings.evalPrompt) {
+                  setEvalPromptTemplate(profile.settings.evalPrompt);
+               }
+            }
+         } catch (e) {
+            console.error("Failed to load evaluation prompt", e);
+         }
+      };
+      loadSettings();
+   }, []);
 
    const [isEvaluating, setIsEvaluating] = useState(false);
    const [logs, setLogs] = useState<LogEntry[]>([]);
 
    useEffect(() => {
-      // Hydrate context data for display
-      try {
-         const scenarios = JSON.parse(localStorage.getItem('quick_scenarios') || '[]');
-         const roles = JSON.parse(localStorage.getItem('quick_roles') || '[]');
+      const loadContext = async () => {
+         try {
+            // Fetch from API
+            const [resScen, resRole] = await Promise.all([
+               fetch(`/api/data/scenarios/${data.scenarioId}`),
+               fetch(`/api/data/roles/${data.roleId}`)
+            ]);
 
-         setScenario(scenarios.find((s: any) => s.id === data.scenarioId) || null);
-         setRole(roles.find((r: any) => r.id === data.roleId) || null);
-      } catch (e) {
-         console.error("Failed to load context for report", e);
+            if (resScen.ok) {
+               const s = await resScen.json();
+               setScenario(s);
+            }
+            if (resRole.ok) {
+               const r = await resRole.json();
+               setRole(r);
+            }
+         } catch (e) {
+            console.error("Failed to load context for report", e);
+         }
+      };
+
+      if (data.scenarioId && data.roleId) {
+         loadContext();
       }
    }, [data]);
 
@@ -124,16 +154,33 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
 
       try {
          let selectedModel = 'gemini-2.5-flash';
-         try {
-            const settings = JSON.parse(localStorage.getItem('quick_settings') || '{}');
-            if (settings.selectedScenarioModel) selectedModel = settings.selectedScenarioModel;
-         } catch (e) {
-            addLog('读取本地配置失败，使用默认模型', 'error');
+         let currentSettings: any = {};
+
+         const resProfile = await fetch('/api/users/profile');
+         if (resProfile.ok) {
+            const profile = await resProfile.json();
+            currentSettings = profile.settings || {};
+            if (currentSettings.selectedScenarioModel) {
+               selectedModel = currentSettings.selectedScenarioModel;
+            }
          }
 
          const modelDisplayName = selectedModel.includes('pro') ? 'Wanyi Pro' : 'Wanyi Flash';
          addLog(`使用 AI 模型: ${modelDisplayName}`, 'info');
-         localStorage.setItem('quick_eval_prompt', evalPromptTemplate);
+
+         // Save Prompt to API (Async, don't block)
+         if (evalPromptTemplate !== currentSettings.evalPrompt) {
+            fetch('/api/users/profile', {
+               method: 'PUT',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({
+                  settings: {
+                     ...currentSettings,
+                     evalPrompt: evalPromptTemplate
+                  }
+               })
+            }).catch(console.error);
+         }
 
          addLog('准备上下文数据 (Transcript & Criteria)...', 'info');
          const transcript = data.messages
@@ -209,26 +256,27 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
       }
    };
 
-   const handleSaveResult = () => {
+   const handleSaveResult = async () => {
       if (!aiEvaluation) return;
 
       try {
-         const sessions = JSON.parse(localStorage.getItem('quick_sessions') || '[]');
-         const idx = sessions.findIndex((s: any) => s.id === data.id);
+         const res = await fetch(`/api/history/${data.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+               score: aiEvaluation.totalScore,
+               aiAnalysis: aiEvaluation
+            })
+         });
 
-         if (idx !== -1) {
-            sessions[idx].score = aiEvaluation.totalScore;
-            sessions[idx].aiAnalysis = aiEvaluation;
-            localStorage.setItem('quick_sessions', JSON.stringify(sessions));
-
-            addLog('评估结果已成功保存到历史记录！', 'success');
+         if (res.ok) {
+            addLog('评估结果已成功保存到后端！', 'success');
             setHasUnsavedChanges(false);
-
             setTimeout(() => {
                setIsEvalModalOpen(false);
             }, 800);
          } else {
-            addLog('保存失败：找不到原始会话记录 (ID Not Found)', 'error');
+            addLog(`保存失败: ${res.statusText}`, 'error');
          }
       } catch (e: any) {
          addLog(`保存失败: ${e.message}`, 'error');

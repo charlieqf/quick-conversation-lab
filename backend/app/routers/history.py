@@ -102,6 +102,13 @@ def create_session(session: SessionCreate, db: Session = Depends(get_db)):
     db.refresh(db_session)
     return db_session
 
+class SessionUpdate(BaseModel):
+    score: Optional[int] = None
+    aiAnalysis: Optional[dict] = Field(None, validation_alias="ai_analysis", serialization_alias="aiAnalysis")
+    messages: Optional[List[dict]] = None
+    # Allow updating duration or timestamps if needed, though usually fixed
+    model_config = ConfigDict(populate_by_name=True)
+
 @router.delete("/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(get_db)):
     user_id = get_current_user_id(db)
@@ -116,6 +123,28 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
     db.delete(db_session)
     db.commit()
     return {"ok": True}
+
+@router.put("/{session_id}", response_model=SessionRead)
+def update_session(session_id: str, update_data: SessionUpdate, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(db)
+    db_session = db.query(SessionRecord).filter(
+        SessionRecord.id == session_id,
+        SessionRecord.user_id == user_id
+    ).first()
+    
+    if not db_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if update_data.score is not None:
+        db_session.score = update_data.score
+    if update_data.aiAnalysis is not None:
+        db_session.ai_analysis = update_data.aiAnalysis
+    if update_data.messages is not None:
+        db_session.messages = update_data.messages
+        
+    db.commit()
+    db.refresh(db_session)
+    return db_session
 
 @router.post("/seed")
 def seed_test_data(db: Session = Depends(get_db)):
