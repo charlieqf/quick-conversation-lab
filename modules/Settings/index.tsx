@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { ModelSelector } from './components/ModelSelector';
 import { VoiceSelector } from './components/VoiceSelector';
+import { ImageModelSelector } from './components/ImageModelSelector';
 import { UserSettings, APIModel, APIVoice } from '../../types';
 const DEFAULT_SETTINGS: UserSettings = {
   apiKeyConfigured: false,
   apiReady: false,
   selectedModel: 'gemini',
   selectedVoice: 'Kore',
-  selectedScenarioModel: 'gemini-2.5-flash'
+  selectedScenarioModel: 'gemini-2.5-flash',
+  selectedImageModel: 'imagen-4.0-generate-001'
 };
 
 const SCENARIO_MODELS_FALLBACK: APIModel[] = [
@@ -149,13 +151,12 @@ export const SettingsModule: React.FC = () => {
 
   // Save Settings when changed
   const updateSettings = async (updates: Partial<UserSettings>) => {
-    setSettings(prev => {
-      const next = { ...prev, ...updates };
-      return next;
-    });
+    // 1. Optimistic Update
+    const nextSettings = { ...settings, ...updates };
+    setSettings(nextSettings);
 
     try {
-      // 1. Fetch current profile settings to merge (safe update)
+      // 2. Fetch current profile settings to merge (safe update)
       const resGet = await fetch('/api/users/profile');
       let currentSettings = {};
       if (resGet.ok) {
@@ -163,15 +164,26 @@ export const SettingsModule: React.FC = () => {
         currentSettings = p.settings || {};
       }
 
-      // 2. Push update
+      // 3. Construct Payload with Fallbacks
+      // We prioritize: updates > currentSettings (DB) > nextSettings (Local State for missing DB fields)
+      // This ensures that if 'selectedModel' matches default and is missing in DB, we still save it.
+      const payloadSettings = {
+        ...currentSettings, // Start with what's in DB (to keep other potential fields)
+        ...updates // Apply our changes
+      };
+
+      // Ensure critical fields are present. If missing in DB/Updates, grab from optimistic state
+      if (!payloadSettings.selectedModel) payloadSettings.selectedModel = nextSettings.selectedModel;
+      if (!payloadSettings.selectedVoice) payloadSettings.selectedVoice = nextSettings.selectedVoice;
+      if (!payloadSettings.selectedImageModel) payloadSettings.selectedImageModel = nextSettings.selectedImageModel;
+      if (!payloadSettings.selectedScenarioModel) payloadSettings.selectedScenarioModel = nextSettings.selectedScenarioModel;
+
+      // 4. Push update
       await fetch('/api/users/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          settings: {
-            ...currentSettings,
-            ...updates
-          }
+          settings: payloadSettings
         })
       });
     } catch (e) {
@@ -289,6 +301,14 @@ export const SettingsModule: React.FC = () => {
             用于读取 PDF 和生成场景配置的纯文本/多模态模型。推荐使用 Gemini 2.5 Flash。
           </p>
         </div>
+
+        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
+
+        {/* Section 1.8: Image Model (New) */}
+        <ImageModelSelector
+          selectedModel={settings.selectedImageModel || 'imagen-4.0-generate-001'}
+          onSelect={(id) => updateSettings({ selectedImageModel: id })}
+        />
 
         <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
 

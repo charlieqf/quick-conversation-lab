@@ -173,18 +173,28 @@ Context Data:
     addLog('正在请求 Backend 生成真实头像...', 'info');
 
     try {
+      // 1. Get Selected Image Model
+      let selectedModel = 'imagen-4.0-generate-001';
+      try {
+        const res = await fetch('/api/users/profile');
+        if (res.ok) {
+          const p = await res.json();
+          if (p.settings?.selectedImageModel) selectedModel = p.settings.selectedImageModel;
+        }
+      } catch (e) { }
+
       // Construct prompt using template and placeholders
       const prompt = avatarPromptTemplate
         .replace(/{name}/g, role.nameCN || '')
         .replace(/{title}/g, role.title || '')
         .replace(/{description}/g, role.description || 'Professional and experienced');
 
-      addLog(`Sending Image Generation Request...`, 'info', prompt);
+      addLog(`Sending Image Generation Request (Model: ${selectedModel})...`, 'info', prompt);
 
       const res = await fetch('/api/models/tools/image-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, model: selectedModel })
       });
 
       if (!res.ok) {

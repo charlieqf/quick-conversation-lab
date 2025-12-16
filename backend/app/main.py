@@ -36,7 +36,7 @@ app.add_middleware(
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(history.router, prefix="/api/history", tags=["history"])
 app.include_router(websocket.router, tags=["websocket"])
-app.include_router(users.router, prefix="/api/user", tags=["users"])
+app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(data_manage.router, prefix="/api/data", tags=["data"])
 
 

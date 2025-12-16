@@ -12,7 +12,7 @@ class User(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     username = Column(String(100), unique=True, index=True, nullable=False) # Login ID
-    avatar_url = Column(String(512), nullable=True) # URL path
+    avatar_url = Column(Text(4294967295), nullable=True) # URL path or Base64 data (LONGTEXT)
     settings = Column(JSON, nullable=True) # User-specific settings
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -56,7 +56,7 @@ class Role(Base):
     name = Column(String(100)) # English ID
     name_cn = Column(String(100), index=True) # Chinese Name
     title = Column(String(100))
-    avatar_url = Column(String(512)) # Replaces Base64
+    avatar_url = Column(Text(4294967295)) # Replaces Base64 (LONGTEXT)
     avatar_seed = Column(String(100)) # Fallback seed
     
     description = Column(Text)

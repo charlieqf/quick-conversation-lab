@@ -49,6 +49,25 @@ async def list_models(response: Response):
     return models
 
 
+@router.get("/scenario", response_model=List[dict])
+async def list_scenario_models():
+    """List models supported for Scenario Generation (Mirroring Legacy App Options)"""
+    return [
+        { 
+            "id": "gemini-2.5-flash", 
+            "name": "Gemini 2.5 Flash", 
+            "badge": "Fast",
+            "description": "Optimized for speed and efficiency. Best for real-time interactions." 
+        },
+        { 
+            "id": "gemini-3-pro-preview", 
+            "name": "Gemini 3.0 Pro", 
+            "badge": "Smart",
+            "description": "High reasoning capability. Best for complex scenario generation." 
+        }
+    ]
+
+
 @router.get("/{model_id}")
 async def get_model(model_id: str):
     """Get detailed capabilities for a specific model"""
@@ -217,23 +236,6 @@ async def preview_voice(req: PreviewRequest):
         raise HTTPException(status_code=400, detail="Unsupported model for preview")
 
 
-@router.get("/scenario", response_model=List[dict])
-async def list_scenario_models():
-    """List models supported for Scenario Generation (Mirroring Legacy App Options)"""
-    return [
-        { 
-            "id": "gemini-2.5-flash", 
-            "name": "Gemini 2.5 Flash", 
-            "badge": "Fast",
-            "description": "Optimized for speed and efficiency. Best for real-time interactions." 
-        },
-        { 
-            "id": "gemini-3-pro-preview", 
-            "name": "Gemini 3.0 Pro", 
-            "badge": "Smart",
-            "description": "High reasoning capability. Best for complex scenario generation." 
-        }
-    ]
 
 
 class ScenarioRequest(BaseModel):
@@ -290,51 +292,89 @@ async def generate_scenario(req: ScenarioRequest, db: Session = Depends(get_db))
 
 class ImageGenerationRequest(BaseModel):
     prompt: str
+    model: Optional[str] = "imagen-4.0-generate-001"
 
 @router.post("/tools/image-generate")
 async def generate_image(req: ImageGenerationRequest, db: Session = Depends(get_db)):
-    """Proxy request to Imagen for avatar generation"""
+    """Proxy request to Imagen/Gemini for avatar generation"""
     user_key = get_user_api_key(db)
     api_key = user_key or settings.gemini_api_key
 
     if not api_key:
         raise HTTPException(status_code=500, detail="Gemini API Key not configured")
 
-    # Use Imagen 4 (3.0 not available)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={api_key}"
-
+    model_name = req.model
+    # Cleanup model name if needed (frontend might send different formats, but we expect exact IDs)
+    
     async with httpx.AsyncClient() as client:
         try:
-            # Imagen API format
-            payload = {
-                "instances": [
-                    { "prompt": req.prompt }
-                ],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "1:1"
+            # 1. Imagen Logic (e.g. imagen-4.0-generate-001, imagen-3.0-generate-001)
+            # Uses the ':predict' endpoint and specific payload
+            if "imagen" in model_name.lower():
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:predict?key={api_key}"
+                payload = {
+                    "instances": [
+                        { "prompt": req.prompt }
+                    ],
+                    "parameters": {
+                        "sampleCount": 1,
+                        "aspectRatio": "1:1"
+                    }
                 }
-            }
-            
-            res = await client.post(
-                url,
-                json=payload,
-                timeout=30.0
-            )
-            
-            if res.status_code != 200:
-                print(f"Imagen Error: {res.text}")
-                raise HTTPException(status_code=res.status_code, detail=f"Imagen Error: {res.text}")
                 
-            data = res.json()
-            # Extract base64 image
-            # Response: { "predictions": [ { "bytesBase64Encoded": "..." } ] }
-            try:
-                b64 = data["predictions"][0]["bytesBase64Encoded"]
-                mime_type = data["predictions"][0].get("mimeType", "image/png")
-                return {"image": f"data:{mime_type};base64,{b64}"}
-            except (KeyError, IndexError):
-                raise HTTPException(status_code=500, detail="Invalid response from Imagen")
+                res = await client.post(url, json=payload, timeout=30.0)
+                
+                if res.status_code != 200:
+                    print(f"Imagen Error: {res.text}")
+                    raise HTTPException(status_code=res.status_code, detail=f"Imagen Error: {res.text}")
+                    
+                data = res.json()
+                try:
+                    b64 = data["predictions"][0]["bytesBase64Encoded"]
+                    mime_type = data["predictions"][0].get("mimeType", "image/png")
+                    return {"image": f"data:{mime_type};base64,{b64}"}
+                except (KeyError, IndexError):
+                    raise HTTPException(status_code=500, detail="Invalid response from Imagen")
+
+            # 2. Gemini Logic (e.g. gemini-2.5-flash, gemini-2.5-flash-image)
+            # Uses the ':generateContent' endpoint
+            else:
+                # Fallback to standard generateContent if user selected a Gemini model
+                # Note: 'gemini-2.5-flash' might strictly be text, but 'gemini-2.5-flash-image' exists in some contexts.
+                # We pass it through.
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                
+                payload = {
+                  "contents": [
+                    {
+                      "parts": [
+                        { "text": req.prompt }
+                      ]
+                    }
+                  ],
+                  "generation_config": {
+                      "response_mime_type": "image/jpeg"
+                  }
+                }
+
+                res = await client.post(url, json=payload, timeout=30.0)
+
+                if res.status_code != 200:
+                    print(f"Gemini Image Gen Error: {res.text}")
+                    raise HTTPException(status_code=res.status_code, detail=f"Gemini Error: {res.text}")
+
+                data = res.json()
+                # Gemini returns images in inlineData
+                try:
+                    part = data["candidates"][0]["content"]["parts"][0]
+                    if "inlineData" in part:
+                        b64 = part["inlineData"]["data"]
+                        mime_type = part["inlineData"].get("mimeType", "image/jpeg")
+                        return {"image": f"data:{mime_type};base64,{b64}"}
+                    else:
+                        raise HTTPException(status_code=500, detail="Model returned text instead of image")
+                except (KeyError, IndexError):
+                    raise HTTPException(status_code=500, detail="Invalid response from Gemini")
                 
         except Exception as e:
             print(f"Image Gen Exception: {e}")

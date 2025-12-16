@@ -142,6 +142,7 @@ export interface UserSettings {
   selectedModel: AIModelId;
   selectedVoice: VoiceId;
   selectedScenarioModel?: AIModelId; // New field for Scenario Generation (Text/Multimodal)
+  selectedImageModel?: AIModelId; // New field for Image Generation
   customApiKey?: string; // Google/Gemini Key
   customOpenaiKey?: string;
   customDoubaoKey?: string;
