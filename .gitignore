@@ -28,3 +28,4 @@ backend/.env
 materials
 .firebase/
 *.db
+*.zip

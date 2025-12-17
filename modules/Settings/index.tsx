@@ -165,14 +165,16 @@ export const SettingsModule: React.FC = () => {
       }
 
       // 3. Construct Payload with Fallbacks
-      // We prioritize: updates > currentSettings (DB) > nextSettings (Local State for missing DB fields)
-      // This ensures that if 'selectedModel' matches default and is missing in DB, we still save it.
+      // We prioritize: updates > nextSettings (Local State) > currentSettings (DB)
+      // This ensures that our local state (what the user sees) is the source of truth for managed fields,
+      // while currentSettings preserves any unmanaged fields from the DB.
       const payloadSettings = {
-        ...currentSettings, // Start with what's in DB (to keep other potential fields)
-        ...updates // Apply our changes
+        ...currentSettings, // Base: DB state (preserves unknown/server-side-only fields)
+        ...nextSettings,    // Overwrite: Local state (Model, Voice, Keys - ensures consistency)
+        ...updates          // Overwrite: Explicit updates (redundant if in nextSettings, but safe)
       };
 
-      // Ensure critical fields are present. If missing in DB/Updates, grab from optimistic state
+      // Ensure critical fields are present (redundant safety check, but harmless)
       if (!payloadSettings.selectedModel) payloadSettings.selectedModel = nextSettings.selectedModel;
       if (!payloadSettings.selectedVoice) payloadSettings.selectedVoice = nextSettings.selectedVoice;
       if (!payloadSettings.selectedImageModel) payloadSettings.selectedImageModel = nextSettings.selectedImageModel;
