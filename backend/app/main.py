@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import models, websocket, history, users, data_manage
+from app.routers import models, websocket, history, users, data_manage, auth
 from app.database import engine
 from app import models as db_models
 
@@ -37,6 +37,7 @@ app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(history.router, prefix="/api/history", tags=["history"])
 app.include_router(websocket.router, tags=["websocket"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(data_manage.router, prefix="/api/data", tags=["data"])
 
 

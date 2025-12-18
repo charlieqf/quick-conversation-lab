@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { APIVoice } from '../../../types';
 import { Mic, Play, Volume2, Loader2, VolumeX } from 'lucide-react';
+import { useAuth } from '../../../contexts/AuthContext';
 
 interface VoiceSelectorProps {
   selectedVoice: string;
@@ -11,6 +12,7 @@ interface VoiceSelectorProps {
 }
 
 export const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, modelId, onSelect, voices, isLoading }) => {
+  const { token } = useAuth();
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -28,6 +30,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, mod
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           modelId: modelId,

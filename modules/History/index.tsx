@@ -1,10 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
-import { History as HistoryIcon, Trash2, Edit2, User, AlertTriangle } from 'lucide-react';
+import { History as HistoryIcon, Trash2, Edit2, User, AlertTriangle, LogOut } from 'lucide-react';
 import { SessionReportData, Scenario, Role, UserProfile } from '../../types';
 import { HistoryItem } from './components/HistoryItem';
 import { UserProfileModal } from './components/UserProfileModal';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface HistoryModuleProps {
    userProfile: UserProfile;
@@ -14,21 +16,24 @@ interface HistoryModuleProps {
 }
 
 export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpdateProfile, onViewReport, onResume }) => {
+   const { token, logout } = useAuth();
    const [sessions, setSessions] = useState<SessionReportData[]>([]);
    const [scenarios, setScenarios] = useState<Scenario[]>([]);
    const [roles, setRoles] = useState<Role[]>([]);
 
+   // UI State
    const [isManageMode, setIsManageMode] = useState(false);
    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-   // Modal States
-   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
    // Load Data
    const loadHistory = async () => {
+      if (!token) return;
       try {
-         const res = await fetch('/api/history');
+         const res = await fetch('/api/history', {
+            headers: { 'Authorization': `Bearer ${token}` }
+         });
          if (res.ok) {
             const data = await res.json();
             setSessions(data);
@@ -40,10 +45,11 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
 
    useEffect(() => {
       const loadMetadata = async () => {
+         if (!token) return;
          try {
             const [sRes, rRes] = await Promise.all([
-               fetch('/api/data/scenarios'),
-               fetch('/api/data/roles')
+               fetch('/api/data/scenarios', { headers: { 'Authorization': `Bearer ${token}` } }),
+               fetch('/api/data/roles', { headers: { 'Authorization': `Bearer ${token}` } })
             ]);
 
             if (sRes.ok) setScenarios(await sRes.json());
@@ -53,13 +59,19 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
          }
       };
 
-      loadHistory();
-      loadMetadata();
-   }, []);
+      if (token) {
+         loadHistory();
+         loadMetadata();
+      }
+   }, [token]);
 
    const handleSeedData = async () => {
+      if (!token) return;
       try {
-         await fetch('/api/history/seed', { method: 'POST' });
+         await fetch('/api/history/seed', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+         });
          loadHistory();
          alert("测试数据已生成！");
       } catch (e) {
@@ -68,9 +80,13 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
    }
 
    const handleDeleteOne = async (id: string) => {
+      if (!token) return;
       if (window.confirm("确定要删除这条记录吗？")) {
          try {
-            await fetch(`/api/history/${id}`, { method: 'DELETE' });
+            await fetch(`/api/history/${id}`, {
+               method: 'DELETE',
+               headers: { 'Authorization': `Bearer ${token}` }
+            });
             // Optimistic update
             setSessions(sessions.filter(s => s.id !== id));
          } catch (e) {
@@ -84,10 +100,14 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
    };
 
    const confirmBatchDelete = async () => {
+      if (!token) return;
       // Concurrent delete
       const idsToDelete = Array.from(selectedIds);
       await Promise.all(idsToDelete.map(id =>
-         fetch(`/api/history/${id}`, { method: 'DELETE' })
+         fetch(`/api/history/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+         })
       ));
 
       loadHistory();
@@ -137,16 +157,27 @@ export const HistoryModule: React.FC<HistoryModuleProps> = ({ userProfile, onUpd
                   </div>
                   <p className="text-[10px] text-slate-400">Review your past simulations</p>
                </div>
+
+               {/* Logout Button */}
+               <button
+                  onClick={logout}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                  title="退出登录"
+               >
+                  <LogOut className="w-5 h-5" />
+               </button>
             </div>
 
             <div className="flex items-center gap-2">
-               <button
-                  onClick={handleSeedData}
-                  className="text-xs text-slate-400 hover:text-medical-600 px-2 py-1 bg-slate-50 rounded"
-                  title="Generate Test Data"
-               >
-                  +测试数据
-               </button>
+               {userProfile.role === 'admin' && (
+                  <button
+                     onClick={handleSeedData}
+                     className="text-xs text-slate-400 hover:text-medical-600 px-2 py-1 bg-slate-50 rounded"
+                     title="Generate Test Data"
+                  >
+                     +测试数据
+                  </button>
+               )}
                {sessions.length > 0 && (
                   <button
                      onClick={toggleManageMode}

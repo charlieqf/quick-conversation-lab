@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from ..database import get_db
 from ..models import User
+from .auth import get_current_active_user
 
 router = APIRouter()
 
@@ -12,39 +13,24 @@ class UserProfileResponse(BaseModel):
     username: str
     avatar_url: Optional[str] = None
     settings: Optional[dict] = None
+    role: str = "user"
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     avatar_url: Optional[str] = None
     settings: Optional[dict] = None
 
-# For MVP, we assume a single "guest" or "admin" user if no Auth header is present.
-# In a real app, we'd decode JWT here.
-def get_current_user_id(db: Session):
-    # Try to find default admin
-    user = db.query(User).filter(User.username == "admin").first()
-    if not user:
-        # Auto-create admin
-        user = User(username="admin", settings={"theme": "light"})
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user.id
-
 @router.get("/profile", response_model=UserProfileResponse)
-def get_profile(db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+def get_profile(current_user: User = Depends(get_current_active_user)):
+    return current_user
 
 @router.put("/profile", response_model=UserProfileResponse)
-def update_profile(profile: UserUpdate, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def update_profile(profile: UserUpdate, 
+                  db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_active_user)):
+    
+    # Refresh because current_user is detached or we want to be sure to modify attached
+    user = db.merge(current_user)
     
     if profile.username:
         user.username = profile.username

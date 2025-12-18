@@ -11,14 +11,14 @@ import httpx
 import base64
 import struct
 import json
+from .auth import get_current_active_user
 
 from app.config import settings
 from app.adapters.base import ModelCapabilities
 from app.adapters.gemini import GeminiAdapter
 
-def get_user_api_key(db: Session) -> Optional[str]:
-    # Assuming single user 'admin' for MVP
-    user = db.query(User).filter(User.username == "admin").first()
+def get_user_api_key(db: Session, user: User) -> Optional[str]:
+    # Use authenticated user
     if user and user.settings and "customApiKey" in user.settings:
         return user.settings["customApiKey"]
     return None
@@ -30,7 +30,7 @@ from ..registry import ADAPTERS
 
 
 @router.get("", response_model=List[dict])
-async def list_models(response: Response):
+async def list_models(response: Response, current_user: User = Depends(get_current_active_user)):
     """List all available voice models"""
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     models = []
@@ -38,11 +38,27 @@ async def list_models(response: Response):
         # Instantiate adapter to get capabilities
         adapter = adapter_cls()
         cap = adapter.capabilities
+        # Determine if enabled based on keys (Server OR User)
+        is_enabled = cap.is_enabled
+        
+        # Key check logic
+        user_settings = current_user.settings if current_user and current_user.settings else {}
+        
+        if "gemini" in adapter_id.lower():
+            has_server_key = bool(settings.gemini_api_key)
+            has_user_key = bool(user_settings.get("customApiKey"))
+            is_enabled = has_server_key or has_user_key
+        elif "openai" in adapter_id.lower() or "gpt" in adapter_id.lower():
+            has_server_key = bool(settings.openai_api_key)
+            has_user_key = bool(user_settings.get("customOpenaiKey"))
+            is_enabled = has_server_key or has_user_key
+        # Add other providers here as needed (e.g. doubao, tongyi)
+
         models.append({
             "id": cap.id,
             "name": cap.name,
             "provider": cap.provider,
-            "isEnabled": cap.is_enabled,
+            "isEnabled": is_enabled,
             "defaultVoice": cap.default_voice,
             "supportsTranscription": cap.supports_transcription
         })
@@ -244,9 +260,11 @@ class ScenarioRequest(BaseModel):
     generation_config: Optional[Dict[str, Any]] = None
 
 @router.post("/tools/scenario-generate")
-async def generate_scenario(req: ScenarioRequest, db: Session = Depends(get_db)):
+async def generate_scenario(req: ScenarioRequest, 
+                           db: Session = Depends(get_db),
+                           current_user: User = Depends(get_current_active_user)):
     """Proxy request to Gemini for scenario generation (secures API Key)"""
-    user_key = get_user_api_key(db)
+    user_key = get_user_api_key(db, current_user)
     api_key = user_key or settings.gemini_api_key
 
     if not api_key:
@@ -295,9 +313,11 @@ class ImageGenerationRequest(BaseModel):
     model: Optional[str] = "imagen-4.0-generate-001"
 
 @router.post("/tools/image-generate")
-async def generate_image(req: ImageGenerationRequest, db: Session = Depends(get_db)):
+async def generate_image(req: ImageGenerationRequest, 
+                        db: Session = Depends(get_db),
+                        current_user: User = Depends(get_current_active_user)):
     """Proxy request to Imagen/Gemini for avatar generation"""
-    user_key = get_user_api_key(db)
+    user_key = get_user_api_key(db, current_user)
     api_key = user_key or settings.gemini_api_key
 
     if not api_key:

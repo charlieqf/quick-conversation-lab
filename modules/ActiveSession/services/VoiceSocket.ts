@@ -10,40 +10,45 @@ export class VoiceSocket {
 
     constructor(
         modelId: string,
+        token: string, // Auth Token
         onLog: (msg: string, type: 'info' | 'error' | 'stream') => void,
         onAudio: (b64: string) => void,
         onTranscript: (role: 'user' | 'model' | 'system', text: string) => void,
         onError: (err: any) => void
     ) {
-        // Protocol mapping: wss://{host}/ws/{model_id}
+        // Protocol mapping: wss://{host}/ws/{model_id}?token={token}
         const apiOverride = localStorage.getItem('VITE_API_BASE_URL');
+        let baseUrl = "";
 
         if (apiOverride) {
             try {
                 // Parse override URL to get host
                 const urlObj = new URL(apiOverride);
                 const protocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
-                this.url = `${protocol}//${urlObj.host}/ws/${modelId}`;
-                console.log(`[VoiceSocket] Using override URL: ${this.url}`);
+                baseUrl = `${protocol}//${urlObj.host}/ws/${modelId}`;
+                console.log(`[VoiceSocket] Using override URL: ${baseUrl}`);
             } catch (e) {
                 console.error("[VoiceSocket] Invalid override URL, falling back to relative.", e);
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const host = window.location.host;
-                this.url = `${protocol}//${host}/ws/${modelId}`;
+                baseUrl = `${protocol}//${host}/ws/${modelId}`;
             }
         } else {
             // Default logic
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const host = window.location.host;
-                this.url = `${protocol}//${host}/ws/${modelId}`;
+                baseUrl = `${protocol}//${host}/ws/${modelId}`;
             } else {
                 // Production: Use direct Cloud Run URL to bypass Firebase Hosting Proxy (which strips Upgrade headers)
                 // This corresponds to voice-model-lab-backend in asia-northeast1
                 const CLOUD_RUN_HOST = "voice-model-lab-backend-1067995682638.asia-northeast1.run.app";
-                this.url = `wss://${CLOUD_RUN_HOST}/ws/${modelId}`;
+                baseUrl = `wss://${CLOUD_RUN_HOST}/ws/${modelId}`;
             }
         }
+
+        // Append Token
+        this.url = `${baseUrl}?token=${token}`;
 
         this.logCallback = onLog;
         this.onAudioCallback = onAudio;

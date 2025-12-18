@@ -5,6 +5,7 @@ import { LogEntry, Scenario, Role, SessionReportData, ChatMessage } from '../../
 import { DEFAULT_SESSION_CONFIG } from '../constants';
 import { AudioStreamer } from '../services/AudioStreamer';
 import { VoiceSocket } from '../services/VoiceSocket';
+import { useAuth } from '../../../contexts/AuthContext';
 
 // Helpers
 const float32ToInt16 = (float32: Float32Array) => {
@@ -27,6 +28,7 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
 };
 
 export const useSessionConnection = (scenarioId: string, roleId: string) => {
+  const { token } = useAuth();
   const [status, setStatus] = useState<ConnectionState>('disconnected');
   // Initialize with 24000 Hz for Gemini
   const [config, setConfig] = useState<SessionConfig>({
@@ -83,8 +85,8 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   const fetchContextData = async () => {
     try {
       const [resScen, resRole] = await Promise.all([
-        fetch(`/api/data/scenarios/${scenarioId}`),
-        fetch(`/api/data/roles/${roleId}`)
+        fetch(`/api/data/scenarios/${scenarioId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`/api/data/roles/${roleId}`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
       if (!resScen.ok || !resRole.ok) {
@@ -103,6 +105,10 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   // Connect Logic
   const connect = async () => {
     if (status === 'connected' || status === 'connecting') return;
+    if (!token) {
+      log('Authentication Token missing.', 'error');
+      return;
+    }
 
     setStatus('connecting');
     log('Initializing Session...', 'info');
@@ -140,7 +146,7 @@ Do not break character. Speak Chinese.
       // 1. Load User Settings (Model & Voice) from API
       let userSettings = { selectedModel: 'gemini', selectedVoice: 'Kore' };
       try {
-        const res = await fetch('/api/users/profile');
+        const res = await fetch('/api/users/profile', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) {
           const profile = await res.json();
           const s = profile.settings || {};
@@ -185,6 +191,7 @@ Do not break character. Speak Chinese.
       // 3. Init Socket
       const socket = new VoiceSocket(
         userSettings.selectedModel,
+        token, // Pass Token
         (msg, type) => log(msg, type),
         (b64) => playAudioChunk(b64),
         (role, text) => {

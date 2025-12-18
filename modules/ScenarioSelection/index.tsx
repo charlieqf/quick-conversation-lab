@@ -5,6 +5,7 @@ import { Scenario, UserProfile } from '../../types';
 import { FileText, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface ScenarioSelectionModuleProps {
   userProfile: UserProfile;
@@ -12,6 +13,8 @@ interface ScenarioSelectionModuleProps {
 }
 
 export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = ({ userProfile, onNavigate }) => {
+  const { token, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +28,9 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
   const fetchScenarios = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/data/scenarios');
+      const res = await fetch('/api/data/scenarios', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Failed to load scenarios');
       const data = await res.json();
       setScenarios(data);
@@ -38,10 +43,13 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
   };
 
   useEffect(() => {
-    fetchScenarios();
-  }, []);
+    if (token) {
+      fetchScenarios();
+    }
+  }, [token]);
 
   const handleCreateNew = () => {
+    if (!isAdmin) return;
     onNavigate('editor'); // Editor will need to handle POST/PUT
   };
 
@@ -50,15 +58,17 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
   };
 
   const handleRequestDelete = (id: string) => {
+    if (!isAdmin) return;
     setDeleteModalState({ isOpen: true, scenarioId: id });
   };
 
   const handleConfirmDelete = async () => {
-    if (!deleteModalState.scenarioId) return;
+    if (!deleteModalState.scenarioId || !token) return;
 
     try {
       const res = await fetch(`/api/data/scenarios/${deleteModalState.scenarioId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (res.ok) {
@@ -83,7 +93,10 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
       try {
         setLoading(true);
         // Call backend seed with reset
-        const res = await fetch('/api/data/seed_defaults?reset=true', { method: 'POST' });
+        const res = await fetch('/api/data/seed_defaults?reset=true', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           fetchScenarios(); // Reload
         } else {
@@ -120,7 +133,7 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
 
   return (
     <div className="min-h-full pb-20">
-      <ScenarioHeader userProfile={userProfile} onNewScenario={handleCreateNew} />
+      <ScenarioHeader userProfile={userProfile} onNewScenario={handleCreateNew} isReadOnly={!isAdmin} />
 
       <div className="px-4 py-4">
         {scenarios.length === 0 ? (
@@ -133,15 +146,18 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
               您已删除了所有场景。您可以创建新场景，或恢复系统默认的演示数据。
             </p>
             <div className="flex flex-col w-full max-w-[200px] gap-3">
-              <button
-                onClick={handleCreateNew}
-                className="bg-medical-600 text-white px-6 py-3 rounded-full text-sm font-semibold shadow-md shadow-medical-600/30 active:scale-95 transition-all"
-              >
-                创建新场景
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={handleCreateNew}
+                  className="bg-medical-600 text-white px-6 py-3 rounded-full text-sm font-semibold shadow-md shadow-medical-600/30 active:scale-95 transition-all"
+                >
+                  创建新场景
+                </button>
+              )}
               <button
                 onClick={handleResetDefaults}
                 className="flex items-center justify-center text-slate-500 py-2 text-sm hover:text-medical-600 transition-colors"
+                disabled={userProfile.role !== 'admin'}
               >
                 <RefreshCw className="w-4 h-4 mr-1.5" />
                 恢复默认数据
@@ -157,6 +173,7 @@ export const ScenarioSelectionModule: React.FC<ScenarioSelectionModuleProps> = (
                 onEdit={handleEdit}
                 onDelete={handleRequestDelete}
                 onSelect={handleSelect}
+                isReadOnly={!isAdmin}
               />
             ))}
             <div className="text-center py-6">

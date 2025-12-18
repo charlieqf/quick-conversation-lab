@@ -5,6 +5,7 @@ import { ScriptTab } from './components/ScriptTab';
 import { ConfigTab } from './components/ConfigTab';
 import { DebugConsole } from './components/DebugConsole';
 import { ScenarioConfig, LogEntry, AttachedFile, AIModelId } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface ScenarioEditorModuleProps {
   scenarioId?: string; // If editing existing
@@ -44,6 +45,7 @@ JSON 结构要求（注意 workflow, knowledgePoints, scoringCriteria 必须是�
 }`;
 
 export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scenarioId, onBack }) => {
+  const { token, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'script' | 'config'>('script');
   const [scriptContent, setScriptContent] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -55,10 +57,12 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
   // Load existing data if editing
   useEffect(() => {
     const loadScenario = async () => {
-      if (scenarioId) {
+      if (scenarioId && token) {
         setIsGenerating(true); // Re-use spinner or add a loading state
         try {
-          const res = await fetch(`/api/data/scenarios/${scenarioId}`);
+          const res = await fetch(`/api/data/scenarios/${scenarioId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
           if (res.ok) {
             const found = await res.json();
             setGeneratedConfig({
@@ -90,7 +94,7 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
       }
     };
     loadScenario();
-  }, [scenarioId]);
+  }, [scenarioId, token]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info', detail?: string) => {
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -128,6 +132,12 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
   };
 
   const handleGenerate = async () => {
+    // Permission check
+    if (user?.role !== 'admin') {
+      alert('只有管理员可以生成场景配置。');
+      return;
+    }
+
     if (!scriptContent.trim() && attachedFiles.length === 0) {
       addLog('错误：请至少上传文件或输入脚本内容。', 'error');
       return;
@@ -139,7 +149,9 @@ export const ScenarioEditorModule: React.FC<ScenarioEditorModuleProps> = ({ scen
     // Determine Model from Settings (Load from API)
     let selectedModel = 'gemini-2.5-flash';
     try {
-      const res = await fetch('/api/users/profile');
+      const res = await fetch('/api/users/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (res.ok) {
         const p = await res.json();
         if (p.settings?.selectedScenarioModel) {
@@ -218,7 +230,8 @@ ${scriptContent}
       const response = await fetch('/api/models/tools/scenario-generate', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           model: selectedModel,
@@ -276,6 +289,11 @@ ${scriptContent}
   };
 
   const handleSave = async () => {
+    if (user?.role !== 'admin') {
+      alert('只有管理员可以保存修改。');
+      return;
+    }
+
     const payload = {
       ...generatedConfig,
       scriptContent: scriptContent,
@@ -294,7 +312,10 @@ ${scriptContent}
 
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
       });
 
@@ -365,6 +386,7 @@ ${scriptContent}
             currentPrompt={systemPrompt}
             onPromptChange={setSystemPrompt}
             onLog={(msg, type) => addLog(msg, type)}
+            isReadOnly={user?.role !== 'admin'}
           />
         ) : (
           <ConfigTab
@@ -372,6 +394,7 @@ ${scriptContent}
             onChange={setGeneratedConfig}
             onSave={handleSave}
             onLog={(msg, type, detail) => addLog(msg, type, detail)}
+            isReadOnly={user?.role !== 'admin'}
           />
         )}
 

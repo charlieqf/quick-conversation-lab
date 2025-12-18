@@ -1,11 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Sparkles, Hash, Save, Settings, Image as ImageIcon, RotateCw } from 'lucide-react';
 import { Role, LogEntry, AIModelId } from '../../types';
 import { PersonalitySliders } from './components/PersonalitySliders';
-import { DebugConsole } from '../ScenarioEditor/components/DebugConsole'; // Reuse console
+import { DebugConsole } from '../ScenarioEditor/components/DebugConsole';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-
+import { useAuth } from '../../contexts/AuthContext';
 
 interface RoleEditorModuleProps {
   roleId?: string;
@@ -44,6 +45,7 @@ Style: High quality, photorealistic, 4k, confident expression, head and shoulder
 Context/Personality: {description}`;
 
 export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBack }) => {
+  const { token, user } = useAuth();
   const [role, setRole] = useState<Role>(DEFAULT_ROLE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -63,13 +65,15 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
 
   useEffect(() => {
     const fetchRole = async () => {
-      if (!roleId) {
-        setRole({ ...DEFAULT_ROLE, id: Date.now().toString() }); // Temp ID for new role
+      if (!roleId || !token) {
+        setRole({ ...DEFAULT_ROLE, id: Date.now().toString() }); // Temp ID
         return;
       }
 
       try {
-        const res = await fetch(`/api/data/roles/${roleId}`);
+        const res = await fetch(`/api/data/roles/${roleId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (!res.ok) throw new Error("Failed to load role");
         const data = await res.json();
         // Determine personality from flattened fields or nested object
@@ -87,7 +91,7 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
     };
 
     fetchRole();
-  }, [roleId]);
+  }, [roleId, token]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info', detail?: string) => {
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -99,6 +103,14 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
   };
 
   const handleGeneratePrompt = async () => {
+    if (!token) return;
+
+    // Permission check
+    if (user?.role !== 'admin') {
+      alert("Permission Denied: Only admins can generate prompts.");
+      return;
+    }
+
     if (!role.description && !role.nameCN) {
       addLog('请至少填写中文姓名或性格描述', 'error');
       return;
@@ -109,10 +121,11 @@ export const RoleEditorModule: React.FC<RoleEditorModuleProps> = ({ roleId, onBa
 
     try {
       // 1. Config Model
-      // Use User's selected Scenario Model (Text Generation)
       let selectedModel = 'gemini-2.5-flash';
       try {
-        const res = await fetch('/api/users/profile');
+        const res = await fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const p = await res.json();
           if (p.settings?.selectedScenarioModel) selectedModel = p.settings.selectedScenarioModel;
@@ -138,7 +151,10 @@ Context Data:
       // 3. Call Backend API
       const res = await fetch('/api/models/tools/scenario-generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           model: selectedModel,
           contents: [{ parts: [{ text: userPrompt }] }]
@@ -163,6 +179,12 @@ Context Data:
   };
 
   const handleGenerateAvatar = async () => {
+    if (!token) return;
+    if (user?.role !== 'admin') {
+      alert("Permission Denied: Only admins can generate avatars.");
+      return;
+    }
+
     if (!role.nameCN && !role.title) {
       addLog('请先填写姓名或职位，以便生成准确的形象', 'error');
       alert('请先填写姓名或职位');
@@ -176,7 +198,9 @@ Context Data:
       // 1. Get Selected Image Model
       let selectedModel = 'imagen-4.0-generate-001';
       try {
-        const res = await fetch('/api/users/profile');
+        const res = await fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const p = await res.json();
           if (p.settings?.selectedImageModel) selectedModel = p.settings.selectedImageModel;
@@ -193,7 +217,10 @@ Context Data:
 
       const res = await fetch('/api/models/tools/image-generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ prompt, model: selectedModel })
       });
 
@@ -219,6 +246,12 @@ Context Data:
   };
 
   const handleSave = async () => {
+    if (!token) return;
+    if (user?.role !== 'admin') {
+      alert("Permission Denied: Only admins can save roles.");
+      return;
+    }
+
     if (!role.nameCN) {
       alert("请输入中文姓名");
       return;
@@ -230,7 +263,10 @@ Context Data:
 
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(role)
       });
 
@@ -264,7 +300,14 @@ Context Data:
           </button>
           <h2 className="text-base font-bold text-slate-800">{roleId ? '编辑角色' : '新建角色'}</h2>
         </div>
-        <Button variant="ghost" className="text-medical-600" onClick={handleSave}>保存</Button>
+        <Button
+          variant="ghost"
+          className="text-medical-600"
+          onClick={handleSave}
+          disabled={user?.role !== 'admin'}
+        >
+          保存
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-10">
@@ -294,6 +337,8 @@ Context Data:
                   isLoading={isGeneratingAvatar}
                   className="text-xs h-8 px-3"
                   icon={<ImageIcon className="w-3 h-3" />}
+                  title={user?.role !== 'admin' ? "Permission Denied" : ""}
+                  disabled={user?.role !== 'admin'}
                 >
                   生成头像
                 </Button>
@@ -407,6 +452,8 @@ Context Data:
             onClick={handleGeneratePrompt}
             isLoading={isGenerating}
             icon={<Sparkles className="w-4 h-4" />}
+            disabled={user?.role !== 'admin'}
+            title={user?.role !== 'admin' ? "Permission Denied" : ""}
           >
             更新 AI 指令 (System Prompt)
           </Button>

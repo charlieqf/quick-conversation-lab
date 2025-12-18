@@ -1,25 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Optional, Any
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 import uuid
 import random
 
 from ..database import get_db
-from ..models import SessionRecord
-
-router = APIRouter()
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Optional, Any
-from pydantic import BaseModel, Field, ConfigDict
-from datetime import datetime
-import uuid
-from ..database import get_db
-from ..models import SessionRecord
-from .users import get_current_user_id
+from ..models import SessionRecord, User
+from .auth import get_current_active_user
 
 router = APIRouter()
 
@@ -29,14 +18,10 @@ class SessionBase(BaseModel):
     roleId: str = Field(validation_alias="role_id", serialization_alias="roleId")
     score: int
     durationSeconds: int = Field(validation_alias="duration_seconds", serialization_alias="durationSeconds")
-    
-    # DB might store nullableJSON, handled by Optional with default
     messages: Optional[List[dict]] = []
-    
     aiAnalysis: Optional[dict] = Field(None, validation_alias="ai_analysis", serialization_alias="aiAnalysis")
     startTime: Optional[datetime] = Field(None, validation_alias="start_time", serialization_alias="startTime")
     endTime: Optional[datetime] = Field(None, validation_alias="end_time", serialization_alias="endTime")
-
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 class SessionCreate(SessionBase):
@@ -45,7 +30,6 @@ class SessionCreate(SessionBase):
         if v and len(v) > 500:
              raise ValueError('Too many messages')
         return v
-    
     model_config = ConfigDict(
         populate_by_name=True,
         json_schema_extra = {
@@ -64,30 +48,33 @@ class SessionRead(SessionBase):
     startTime: datetime = Field(validation_alias="start_time", serialization_alias="startTime")
     endTime: datetime = Field(validation_alias="end_time", serialization_alias="endTime")
     audioUrl: Optional[str] = Field(None, validation_alias="audio_url", serialization_alias="audioUrl")
-
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+class SessionUpdate(BaseModel):
+    score: Optional[int] = None
+    aiAnalysis: Optional[dict] = Field(None, validation_alias="ai_analysis", serialization_alias="aiAnalysis")
+    messages: Optional[List[dict]] = None
+    model_config = ConfigDict(populate_by_name=True)
 
 # --- Endpoints ---
 
 @router.get("", response_model=List[SessionRead])
-def read_sessions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
-    # Filter by user
+def read_sessions(skip: int = 0, limit: int = 100, 
+                 db: Session = Depends(get_db),
+                 current_user: User = Depends(get_current_active_user)):
     sessions = db.query(SessionRecord).filter(
-        SessionRecord.user_id == user_id
+        SessionRecord.user_id == current_user.id
     ).order_by(SessionRecord.start_time.desc()).offset(skip).limit(limit).all()
-    # Handle potentially None messages/analysis explicitly if Pydantic doesn't catch them
-    # But Optional + default in Schema usually handles it unless output is None and field not optional.
-    # We made them Optional.
     return sessions
 
 @router.post("", response_model=SessionRead)
-def create_session(session: SessionCreate, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
+def create_session(session: SessionCreate, 
+                  db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_active_user)):
     
     db_session = SessionRecord(
         id=str(uuid.uuid4()),
-        user_id=user_id,
+        user_id=current_user.id,
         scenario_id=session.scenarioId,
         role_id=session.roleId,
         score=session.score,
@@ -102,21 +89,20 @@ def create_session(session: SessionCreate, db: Session = Depends(get_db)):
     db.refresh(db_session)
     return db_session
 
-class SessionUpdate(BaseModel):
-    score: Optional[int] = None
-    aiAnalysis: Optional[dict] = Field(None, validation_alias="ai_analysis", serialization_alias="aiAnalysis")
-    messages: Optional[List[dict]] = None
-    # Allow updating duration or timestamps if needed, though usually fixed
-    model_config = ConfigDict(populate_by_name=True)
-
 @router.delete("/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
+def delete_session(session_id: str, 
+                  db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_active_user)):
     db_session = db.query(SessionRecord).filter(
         SessionRecord.id == session_id,
-        SessionRecord.user_id == user_id
+        SessionRecord.user_id == current_user.id
     ).first()
     
+    # Admin can delete any session? For now, stick to own session or admin override.
+    # If admin wants to delete any, we check role.
+    if not db_session and current_user.role == 'admin':
+         db_session = db.query(SessionRecord).filter(SessionRecord.id == session_id).first()
+
     if not db_session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -125,11 +111,12 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @router.put("/{session_id}", response_model=SessionRead)
-def update_session(session_id: str, update_data: SessionUpdate, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
+def update_session(session_id: str, update_data: SessionUpdate, 
+                  db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_active_user)):
     db_session = db.query(SessionRecord).filter(
         SessionRecord.id == session_id,
-        SessionRecord.user_id == user_id
+        SessionRecord.user_id == current_user.id
     ).first()
     
     if not db_session:
@@ -147,9 +134,10 @@ def update_session(session_id: str, update_data: SessionUpdate, db: Session = De
     return db_session
 
 @router.post("/seed")
-def seed_test_data(db: Session = Depends(get_db)):
+def seed_test_data(db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_active_user)):
     """Inserts realistic test data for current user"""
-    user_id = get_current_user_id(db)
+    user_id = current_user.id
     
     # Use real IDs from DB
     from ..models import Scenario, Role

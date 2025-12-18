@@ -26,13 +26,15 @@ interface ScenarioCardProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onSelect: (id: string) => void;
+  isReadOnly?: boolean;
 }
 
 export const ScenarioCard: React.FC<ScenarioCardProps> = ({
   scenario,
   onEdit,
   onDelete,
-  onSelect
+  onSelect,
+  isReadOnly = false
 }) => {
   const theme = THEME_CONFIG[scenario.theme];
 
@@ -80,13 +82,15 @@ export const ScenarioCard: React.FC<ScenarioCardProps> = ({
           >
             <Edit2 className="w-4 h-4" />
           </button>
-          <button
-            onClick={handleDelete}
-            className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 active:bg-red-100 rounded-full transition-all"
-            aria-label="删除"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={handleDelete}
+              className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 active:bg-red-100 rounded-full transition-all"
+              aria-label="删除"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 

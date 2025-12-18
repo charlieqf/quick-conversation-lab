@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Settings, Users, BookOpen } from 'lucide-react';
+import { Settings, Users, BookOpen, LogOut } from 'lucide-react';
 import { ScenarioSelectionModule } from './modules/ScenarioSelection';
 import { ScenarioEditorModule } from './modules/ScenarioEditor';
 import { RoleSelectionModule } from './modules/RoleSelection';
@@ -9,6 +9,8 @@ import { ActiveSessionModule } from './modules/ActiveSession';
 import { ReportModule } from './modules/Report';
 import { SettingsModule } from './modules/Settings';
 import { HistoryModule } from './modules/History';
+import { LoginModule } from './modules/Authentication/Login';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AppView, SessionReportData, UserProfile } from './types';
 
 const DEFAULT_USER_PROFILE: UserProfile = {
@@ -16,19 +18,25 @@ const DEFAULT_USER_PROFILE: UserProfile = {
   avatarPrompt: 'A professional portrait of a doctor in a hospital setting, wearing a white coat, high quality, 4k, photorealistic.'
 };
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { user, token, isAuthenticated, isLoading, logout } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('scenarios');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
 
   // User Profile State
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
+  const [lastReportData, setLastReportData] = useState<SessionReportData | null>(null);
 
   // Load Profile from API on mount
   React.useEffect(() => {
+    if (!isAuthenticated || !token) return;
+
     const fetchProfile = async () => {
       try {
-        const res = await fetch('/api/users/profile');
+        const res = await fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const data = await res.json();
           setUserProfile({
@@ -41,19 +49,17 @@ const App: React.FC = () => {
       }
     };
     fetchProfile();
-  }, []);
+  }, [isAuthenticated, token]);
 
   const handleUpdateProfile = async (profile: UserProfile) => {
     // Optimistic Update
     setUserProfile(profile);
 
     try {
-      // We need to fetch current settings first to not overwrite them, or we assume backend merges? 
-      // Backend replaces the settings dict if provided. We should probably merge in frontend or backend.
-      // For safely, let's just do a shallow merge if we had more settings.
-      // But here we can't easily access other settings without fetching or lifting state.
-      // STRATEGY: Fetch current profile to get settings, then update.
-      const resVal = await fetch('/api/users/profile');
+      const resVal = await fetch('/api/users/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
       let currentSettings = {};
       if (resVal.ok) {
         const d = await resVal.json();
@@ -62,7 +68,10 @@ const App: React.FC = () => {
 
       await fetch('/api/users/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           username: profile.name,
           settings: {
@@ -98,7 +107,10 @@ const App: React.FC = () => {
     try {
       const res = await fetch('/api/history', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(data)
       });
 
@@ -132,6 +144,21 @@ const App: React.FC = () => {
     setSelectedRoleId(data.roleId);
     setCurrentView('session');
   };
+
+  if (isLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-50">
+        <div className="animate-pulse flex flex-col items-center">
+          <div className="h-12 w-12 bg-medical-200 rounded-full mb-4"></div>
+          <div className="h-4 w-32 bg-slate-200 rounded"></div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <LoginModule />;
+  }
 
   return (
     <div className="h-screen w-full bg-slate-50 font-sans text-slate-900 flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl border-x border-slate-200">
@@ -206,7 +233,18 @@ const App: React.FC = () => {
 
         {/* Module: Settings */}
         {currentView === 'settings' && (
-          <SettingsModule />
+          <div className="relative">
+            <SettingsModule />
+            <div className="p-4 mt-8">
+              <button
+                onClick={logout}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-red-50 text-red-600 rounded-xl font-medium hover:bg-red-100 transition-colors"
+              >
+                <LogOut className="w-5 h-5" />
+                退出登录
+              </button>
+            </div>
+          </div>
         )}
       </main>
 
@@ -235,19 +273,29 @@ const App: React.FC = () => {
             <span className="text-[10px] font-medium">我的</span>
           </button>
 
-          <button
-            onClick={() => handleNavigation('settings')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === 'settings'
-              ? 'text-medical-600'
-              : 'text-slate-400 hover:text-slate-600'
-              }`}
-          >
-            <Settings className="w-6 h-6" strokeWidth={currentView === 'settings' ? 2.5 : 2} />
-            <span className="text-[10px] font-medium">设置</span>
-          </button>
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => handleNavigation('settings')}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === 'settings'
+                ? 'text-medical-600'
+                : 'text-slate-400 hover:text-slate-600'
+                }`}
+            >
+              <Settings className="w-6 h-6" strokeWidth={currentView === 'settings' ? 2.5 : 2} />
+              <span className="text-[10px] font-medium">设置</span>
+            </button>
+          )}
         </nav>
       )}
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

@@ -7,9 +7,10 @@ interface RoleCardProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onSelect: (id: string) => void;
+  isReadOnly?: boolean;
 }
 
-export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSelect }) => {
+export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSelect, isReadOnly = false }) => {
 
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -74,12 +75,14 @@ export const RoleCard: React.FC<RoleCardProps> = ({ role, onEdit, onDelete, onSe
           >
             <Edit2 className="w-3.5 h-3.5" />
           </button>
-          <button
-            onClick={handleDelete}
-            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={handleDelete}
+              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div className="w-px h-3 bg-slate-200 mx-1"></div>
           <button className="text-xs font-bold text-medical-600 flex items-center pl-1">
             开始 <ArrowRight className="w-3.5 h-3.5 ml-0.5" />

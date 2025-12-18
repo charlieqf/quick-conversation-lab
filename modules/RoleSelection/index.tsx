@@ -5,6 +5,7 @@ import { RoleCard } from './components/RoleCard';
 import { Role } from '../../types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface RoleSelectionModuleProps {
   onBack: () => void;
@@ -13,6 +14,8 @@ interface RoleSelectionModuleProps {
 }
 
 export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack, onNavigate, scenarioId }) => {
+  const { token, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +28,9 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
   const fetchRoles = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/data/roles');
+      const res = await fetch('/api/data/roles', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Failed to load roles');
       const data = await res.json();
       setRoles(data);
@@ -38,10 +43,11 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
   };
 
   useEffect(() => {
-    fetchRoles();
-  }, []);
+    if (token) fetchRoles();
+  }, [token]);
 
   const handleCreate = () => {
+    if (!isAdmin) return;
     onNavigate('role-editor');
   };
 
@@ -50,15 +56,17 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
   };
 
   const handleDeleteRequest = (id: string) => {
+    if (!isAdmin) return;
     setDeleteModalState({ isOpen: true, roleId: id });
   };
 
   const handleConfirmDelete = async () => {
-    if (!deleteModalState.roleId) return;
+    if (!deleteModalState.roleId || !token) return;
 
     try {
       const res = await fetch(`/api/data/roles/${deleteModalState.roleId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         setRoles(prev => prev.filter(r => r.id !== deleteModalState.roleId));
@@ -109,12 +117,14 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
             <p className="text-[10px] text-slate-400">选择陪练对象 (Doctor Persona)</p>
           </div>
         </div>
-        <button
-          onClick={handleCreate}
-          className="w-8 h-8 bg-medical-50 text-medical-600 rounded-full flex items-center justify-center border border-medical-100 shadow-sm active:scale-95 transition-all"
-        >
-          <Plus className="w-5 h-5" />
-        </button>
+        {isAdmin && (
+          <button
+            onClick={handleCreate}
+            className="w-8 h-8 bg-medical-50 text-medical-600 rounded-full flex items-center justify-center border border-medical-100 shadow-sm active:scale-95 transition-all"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* List */}
@@ -132,6 +142,7 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
               onEdit={handleEdit}
               onDelete={handleDeleteRequest}
               onSelect={handleSelectRole}
+              isReadOnly={!isAdmin}
             />
           ))
         )}
@@ -163,6 +174,6 @@ export const RoleSelectionModule: React.FC<RoleSelectionModuleProps> = ({ onBack
           </div>
         </div>
       </Modal>
-    </div>
+    </div >
   );
 };

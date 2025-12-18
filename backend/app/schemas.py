@@ -82,3 +82,28 @@ class RoleRead(RoleBase):
     skepticism: int = 50
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+# --- Auth & User Schemas ---
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: Dict[str, Any] # Return simplified user profile
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class UserBase(BaseModel):
+    username: str
+    role: str = "user"
+    is_active: bool = True
+
+class UserCreate(UserBase):
+    password: str
+
+class UserInDB(UserBase):
+    id: str
+    hashed_password: str
+    
+    model_config = ConfigDict(from_attributes=True)
+

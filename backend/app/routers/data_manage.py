@@ -226,12 +226,38 @@ DEFAULT_ROLES = [
     }
 ]
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..models import Scenario, Role, User
+from datetime import datetime
+import json
+from .auth import get_current_active_user
+
+router = APIRouter()
+
+# ... (DEFAULTS omitted for brevity, keeping existing lists) ...
+# Assuming DEFAULT_SCENARIOS and DEFAULT_ROLES are defined above in original file
+# We'll just focus on the endpoints
+
+# --- Pydantic Schemas ---
+from ..schemas import ScenarioRead, ScenarioCreate, RoleRead, RoleCreate
+import uuid
+
+# --- Helper to Check Admin ---
+def check_admin(user: User):
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+
 @router.post("/seed_defaults")
-def seed_defaults(reset: bool = False, db: Session = Depends(get_db)):
+def seed_defaults(reset: bool = False, 
+                 db: Session = Depends(get_db),
+                 current_user: User = Depends(get_current_active_user)):
     """
-    Idempotently seeds the database. 
-    If reset=True, it wipes existing defaults AND dependent history first.
+    Idempotently seeds the database. Admin only.
     """
+    check_admin(current_user)
+    
     from ..models import SessionRecord
     
     if reset:
@@ -241,10 +267,17 @@ def seed_defaults(reset: bool = False, db: Session = Depends(get_db)):
         db.query(Role).filter(Role.is_default == True).delete()
         db.commit()
     
-    # 1. Ensure Admin
+    # 1. Ensure Admin (Self-healing if missing)
     admin = db.query(User).filter(User.username == "admin").first()
     if not admin:
-        admin = User(username="admin", settings={"theme": "light"})
+        # Should usually exist by now via migration, but safety check
+        from ..core.security import get_password_hash
+        admin = User(
+            username="admin", 
+            hashed_password=get_password_hash("admin"), 
+            role="admin", 
+            settings={"theme": "light"}
+        )
         db.add(admin)
         db.commit()
     
@@ -254,6 +287,7 @@ def seed_defaults(reset: bool = False, db: Session = Depends(get_db)):
         if not existing:
              new_s = Scenario(
                 id=s_data["id"], # Force ID
+                user_id=admin.id, # Assign to System Admin
                 is_default=True,
                 title=s_data["title"],
                 subtitle=s_data["subtitle"],
@@ -274,6 +308,7 @@ def seed_defaults(reset: bool = False, db: Session = Depends(get_db)):
         if not existing:
             new_r = Role(
                 id=r_data["id"], # Force ID
+                user_id=admin.id,
                 is_default=True,
                 name=r_data["name"],
                 name_cn=r_data.get("name_cn"),
@@ -291,25 +326,30 @@ def seed_defaults(reset: bool = False, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success", "message": f"Seeded defaults. Roles added: {added_roles}"}
 
-from ..schemas import ScenarioRead, ScenarioCreate, RoleRead, RoleCreate
-from .users import get_current_user_id
-import uuid
-
-# ... (Previous code for default constants) ...
-
 @router.get("/scenarios", response_model=list[ScenarioRead])
-def get_scenarios(db: Session = Depends(get_db)):
-    """List all available scenarios"""
-    # MVP: Return Defaults + User Created (TODO: Filter by user_id)
-    return db.query(Scenario).all()
+def get_scenarios(db: Session = Depends(get_db),
+                 current_user: User = Depends(get_current_active_user)):
+    """List all available scenarios (Defaults + User's Own)"""
+    # Show defaults AND user's own scenarios
+    # OR show all if admin? Let's stick to visible scope: Defaults + Own
+    scenarios = db.query(Scenario).filter(
+        (Scenario.is_default == True) | 
+        (Scenario.user_id == current_user.id)
+    ).all()
+    return scenarios
 
 @router.post("/scenarios", response_model=ScenarioRead)
-def create_scenario(scenario: ScenarioCreate, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
+def create_scenario(scenario: ScenarioCreate, 
+                   db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_active_user)):
     
+    # Check if standard user can create? Plan said only admin.
+    if current_user.role != "admin":
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create scenarios")
+
     db_obj = Scenario(
         id=str(uuid.uuid4()),
-        user_id=user_id,
+        user_id=current_user.id,
         title=scenario.title,
         subtitle=scenario.subtitle,
         description=scenario.description,
@@ -327,103 +367,36 @@ def create_scenario(scenario: ScenarioCreate, db: Session = Depends(get_db)):
     db.refresh(db_obj)
     return db_obj
 
-@router.get("/roles", response_model=list[RoleRead])
-def get_roles(db: Session = Depends(get_db)):
-    """List all available roles"""
-    roles = db.query(Role).all()
-    # Manual Flattening for Personality (JSON -> Fields)
-    results = []
-    for r in roles:
-        # Convert ORM object to dict-like logic for Pydantic
-        # Or better: Pydantic from_orm will handle base fields, we inject calculated ones
-        # But for 'personality' stored as JSON {"hostility": 50}, we need to extract it.
-        
-        p = r.personality or {}
-        
-        # We can construct the Schema object manually to ensure flattening
-        item = RoleRead(
-            id=r.id,
-            name=r.name,
-            name_cn=r.name_cn,
-            title=r.title,
-            description=r.description,
-            avatar_seed=r.avatar_seed,
-            avatar_url=r.avatar_url,
-            focus_areas=r.focus_areas or [],
-            system_prompt_addon=r.system_prompt_addon,
-            generation_prompt=r.generation_prompt,
-            last_updated=r.last_updated,
-            is_default=r.is_default,
-            personality=p, # Pass the dict too
-            hostility=p.get('hostility', 50),
-            verbosity=p.get('verbosity', 50),
-            skepticism=p.get('skepticism', 50)
-        )
-        results.append(item)
-    return results
-
-@router.post("/roles", response_model=RoleRead)
-def create_role(role: RoleCreate, db: Session = Depends(get_db)):
-    user_id = get_current_user_id(db)
-    
-    # Pack flattened fields into JSON
-    personality_json = {
-        "hostility": role.hostility,
-        "verbosity": role.verbosity,
-        "skepticism": role.skepticism
-    }
-    
-    db_obj = Role(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        name=role.name,
-        name_cn=role.nameCN,
-        title=role.title,
-        description=role.description,
-        avatar_seed=role.avatarSeed,
-        avatar_url=role.avatarImage,
-        focus_areas=role.focusAreas,
-        personality=personality_json, # Store packed
-        system_prompt_addon=role.systemPromptAddon,
-        generation_prompt=role.generationPrompt
-    )
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    
-    # Return formatted
-    return RoleRead(
-        id=db_obj.id,
-        name=db_obj.name,
-        name_cn=db_obj.name_cn,
-        title=db_obj.title,
-        description=db_obj.description,
-        avatar_seed=db_obj.avatar_seed,
-        avatar_url=db_obj.avatar_url,
-        focus_areas=db_obj.focus_areas or [],
-        system_prompt_addon=db_obj.system_prompt_addon,
-        generation_prompt=db_obj.generation_prompt,
-        last_updated=db_obj.last_updated,
-        is_default=db_obj.is_default,
-        personality=personality_json,
-        hostility=role.hostility,
-        verbosity=role.verbosity,
-        skepticism=role.skepticism
-    )
-
 @router.get("/scenarios/{scenario_id}", response_model=ScenarioRead)
-def get_scenario(scenario_id: str, db: Session = Depends(get_db)):
+def get_scenario(scenario_id: str, 
+                db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_active_user)):
     db_obj = db.query(Scenario).filter(Scenario.id == scenario_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Permission check: Is it default or own?
+    if not db_obj.is_default and db_obj.user_id != current_user.id and current_user.role != "admin":
+         raise HTTPException(status_code=403, detail="Access denied")
+         
     return db_obj
 
 @router.put("/scenarios/{scenario_id}", response_model=ScenarioRead)
-def update_scenario(scenario_id: str, scenario: ScenarioCreate, db: Session = Depends(get_db)):
-    # ... existing code ...
+def update_scenario(scenario_id: str, scenario: ScenarioCreate, 
+                   db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_active_user)):
+    
     db_obj = db.query(Scenario).filter(Scenario.id == scenario_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Only owner or admin
+    if db_obj.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    # Standard user cannot edit Default scenarios even if they could see them
+    if db_obj.is_default and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Cannot edit default scenarios")
     
     # Update fields
     db_obj.title = scenario.title
@@ -443,11 +416,19 @@ def update_scenario(scenario_id: str, scenario: ScenarioCreate, db: Session = De
     return db_obj
 
 @router.delete("/scenarios/{scenario_id}")
-def delete_scenario(scenario_id: str, db: Session = Depends(get_db)):
-    # ... existing code ...
+def delete_scenario(scenario_id: str, 
+                   db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_active_user)):
+    
     db_obj = db.query(Scenario).filter(Scenario.id == scenario_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    if db_obj.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if db_obj.is_default and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Cannot delete default scenarios")
     
     db.delete(db_obj)
     db.commit()
@@ -455,13 +436,101 @@ def delete_scenario(scenario_id: str, db: Session = Depends(get_db)):
 
 # Roles
 
+@router.get("/roles", response_model=list[RoleRead])
+def get_roles(db: Session = Depends(get_db),
+             current_user: User = Depends(get_current_active_user)):
+    """List all available roles"""
+    roles = db.query(Role).filter(
+        (Role.is_default == True) | 
+        (Role.user_id == current_user.id)
+    ).all()
+    
+    results = []
+    for r in roles:
+        p = r.personality or {}
+        item = RoleRead(
+            id=r.id,
+            name=r.name,
+            name_cn=r.name_cn,
+            title=r.title,
+            description=r.description,
+            avatar_seed=r.avatar_seed,
+            avatar_url=r.avatar_url,
+            focus_areas=r.focus_areas or [],
+            system_prompt_addon=r.system_prompt_addon,
+            generation_prompt=r.generation_prompt,
+            last_updated=r.last_updated,
+            is_default=r.is_default,
+            personality=p, 
+            hostility=p.get('hostility', 50),
+            verbosity=p.get('verbosity', 50),
+            skepticism=p.get('skepticism', 50)
+        )
+        results.append(item)
+    return results
+
+@router.post("/roles", response_model=RoleRead)
+def create_role(role: RoleCreate, 
+               db: Session = Depends(get_db),
+               current_user: User = Depends(get_current_active_user)):
+    
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create roles")
+    
+    personality_json = {
+        "hostility": role.hostility,
+        "verbosity": role.verbosity,
+        "skepticism": role.skepticism
+    }
+    
+    db_obj = Role(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        name=role.name,
+        name_cn=role.nameCN,
+        title=role.title,
+        description=role.description,
+        avatar_seed=role.avatarSeed,
+        avatar_url=role.avatarImage,
+        focus_areas=role.focusAreas,
+        personality=personality_json, 
+        system_prompt_addon=role.systemPromptAddon,
+        generation_prompt=role.generationPrompt
+    )
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    
+    return RoleRead(
+        id=db_obj.id,
+        name=db_obj.name,
+        name_cn=db_obj.name_cn,
+        title=db_obj.title,
+        description=db_obj.description,
+        avatar_seed=db_obj.avatar_seed,
+        avatar_url=db_obj.avatar_url,
+        focus_areas=db_obj.focus_areas or [],
+        system_prompt_addon=db_obj.system_prompt_addon,
+        generation_prompt=db_obj.generation_prompt,
+        last_updated=db_obj.last_updated,
+        is_default=db_obj.is_default,
+        personality=personality_json,
+        hostility=role.hostility,
+        verbosity=role.verbosity,
+        skepticism=role.skepticism
+    )
+
 @router.get("/roles/{role_id}", response_model=RoleRead)
-def get_role(role_id: str, db: Session = Depends(get_db)):
+def get_role(role_id: str, 
+            db: Session = Depends(get_db),
+            current_user: User = Depends(get_current_active_user)):
     db_obj = db.query(Role).filter(Role.id == role_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Role not found")
     
-    # Manual Flattening (same as list)
+    if not db_obj.is_default and db_obj.user_id != current_user.id and current_user.role != "admin":
+         raise HTTPException(status_code=403, detail="Access denied")
+
     p = db_obj.personality or {}
     return RoleRead(
         id=db_obj.id,
@@ -483,10 +552,18 @@ def get_role(role_id: str, db: Session = Depends(get_db)):
     )
 
 @router.put("/roles/{role_id}", response_model=RoleRead)
-def update_role(role_id: str, role: RoleCreate, db: Session = Depends(get_db)):
+def update_role(role_id: str, role: RoleCreate, 
+               db: Session = Depends(get_db),
+               current_user: User = Depends(get_current_active_user)):
     db_obj = db.query(Role).filter(Role.id == role_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Role not found")
+        
+    if db_obj.user_id != current_user.id and current_user.role != "admin":
+         raise HTTPException(status_code=403, detail="Access denied")
+    
+    if db_obj.is_default and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Cannot edit default roles")
 
     personality_json = {
         "hostility": role.hostility,
@@ -508,7 +585,6 @@ def update_role(role_id: str, role: RoleCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_obj)
     
-    # Return mapped
     p = db_obj.personality or {}
     return RoleRead(
         id=db_obj.id,
@@ -530,10 +606,18 @@ def update_role(role_id: str, role: RoleCreate, db: Session = Depends(get_db)):
     )
 
 @router.delete("/roles/{role_id}")
-def delete_role(role_id: str, db: Session = Depends(get_db)):
+def delete_role(role_id: str, 
+               db: Session = Depends(get_db),
+               current_user: User = Depends(get_current_active_user)):
     db_obj = db.query(Role).filter(Role.id == role_id).first()
     if not db_obj:
         raise HTTPException(status_code=404, detail="Role not found")
+    
+    if db_obj.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if db_obj.is_default and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Cannot delete default roles")
     
     db.delete(db_obj)
     db.commit()

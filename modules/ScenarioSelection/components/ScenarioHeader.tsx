@@ -7,9 +7,10 @@ import { UserProfile } from '../../../types';
 interface ScenarioHeaderProps {
   userProfile: UserProfile;
   onNewScenario: () => void;
+  isReadOnly?: boolean;
 }
 
-export const ScenarioHeader: React.FC<ScenarioHeaderProps> = ({ userProfile, onNewScenario }) => {
+export const ScenarioHeader: React.FC<ScenarioHeaderProps> = ({ userProfile, onNewScenario, isReadOnly = false }) => {
   const [greeting, setGreeting] = useState('');
   const [dateString, setDateString] = useState('');
 
@@ -17,17 +18,17 @@ export const ScenarioHeader: React.FC<ScenarioHeaderProps> = ({ userProfile, onN
     const updateTime = () => {
       const now = new Date();
       const hour = now.getHours();
-      
+
       if (hour < 6) setGreeting('夜深了');
       else if (hour < 11) setGreeting('早上好');
       else if (hour < 13) setGreeting('中午好');
       else if (hour < 18) setGreeting('下午好');
       else setGreeting('晚上好');
 
-      const dateOptions: Intl.DateTimeFormatOptions = { 
-        month: 'long', 
-        day: 'numeric', 
-        weekday: 'long' 
+      const dateOptions: Intl.DateTimeFormatOptions = {
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long'
       };
       // Force Chinese locale
       setDateString(new Intl.DateTimeFormat('zh-CN', dateOptions).format(now));
@@ -47,15 +48,17 @@ export const ScenarioHeader: React.FC<ScenarioHeaderProps> = ({ userProfile, onN
             {dateString}
           </p>
         </div>
-        <div className="flex-shrink-0">
-          <button 
-            onClick={onNewScenario}
-            className="w-10 h-10 bg-medical-50 text-medical-600 rounded-full flex items-center justify-center border border-medical-100 shadow-sm active:scale-95 transition-all"
-            aria-label="新建场景"
-          >
-            <Plus className="w-6 h-6" />
-          </button>
-        </div>
+        {!isReadOnly && (
+          <div className="flex-shrink-0">
+            <button
+              onClick={onNewScenario}
+              className="w-10 h-10 bg-medical-50 text-medical-600 rounded-full flex items-center justify-center border border-medical-100 shadow-sm active:scale-95 transition-all"
+              aria-label="新建场景"
+            >
+              <Plus className="w-6 h-6" />
+            </button>
+          </div>
+        )}
       </div>
       <p className="text-slate-500 text-sm">
         选择一个临床场景开始您的模拟训练或评估。

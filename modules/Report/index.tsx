@@ -8,6 +8,7 @@ import { Timeline } from './components/Timeline';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { DebugConsole } from '../ScenarioEditor/components/DebugConsole';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface ReportModuleProps {
    data: SessionReportData;
@@ -48,6 +49,7 @@ JSON Format:
 }`;
 
 export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetry }) => {
+   const { token } = useAuth();
    const [scenario, setScenario] = useState<Scenario | null>(null);
    const [role, setRole] = useState<Role | null>(null);
 
@@ -68,8 +70,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
    // Load Prompt from API
    useEffect(() => {
       const loadSettings = async () => {
+         if (!token) return;
          try {
-            const res = await fetch('/api/users/profile');
+            const res = await fetch('/api/users/profile', {
+               headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (res.ok) {
                const profile = await res.json();
                if (profile.settings && profile.settings.evalPrompt) {
@@ -81,18 +86,19 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
          }
       };
       loadSettings();
-   }, []);
+   }, [token]);
 
    const [isEvaluating, setIsEvaluating] = useState(false);
    const [logs, setLogs] = useState<LogEntry[]>([]);
 
    useEffect(() => {
       const loadContext = async () => {
+         if (!token) return;
          try {
             // Fetch from API
             const [resScen, resRole] = await Promise.all([
-               fetch(`/api/data/scenarios/${data.scenarioId}`),
-               fetch(`/api/data/roles/${data.roleId}`)
+               fetch(`/api/data/scenarios/${data.scenarioId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+               fetch(`/api/data/roles/${data.roleId}`, { headers: { 'Authorization': `Bearer ${token}` } })
             ]);
 
             if (resScen.ok) {
@@ -111,7 +117,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
       if (data.scenarioId && data.roleId) {
          loadContext();
       }
-   }, [data]);
+   }, [data, token]);
 
    const addLog = (message: string, type: LogEntry['type'] = 'info', detail?: string) => {
       const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -146,7 +152,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
    };
 
    const handleReEvaluate = async () => {
-      if (!scenario) return;
+      if (!scenario || !token) return;
 
       setLogs([]); // Clear previous logs
       setIsEvaluating(true);
@@ -156,7 +162,9 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
          let selectedModel = 'gemini-2.5-flash';
          let currentSettings: any = {};
 
-         const resProfile = await fetch('/api/users/profile');
+         const resProfile = await fetch('/api/users/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+         });
          if (resProfile.ok) {
             const profile = await resProfile.json();
             currentSettings = profile.settings || {};
@@ -172,7 +180,10 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
          if (evalPromptTemplate !== currentSettings.evalPrompt) {
             fetch('/api/users/profile', {
                method: 'PUT',
-               headers: { 'Content-Type': 'application/json' },
+               headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+               },
                body: JSON.stringify({
                   settings: {
                      ...currentSettings,
@@ -202,7 +213,10 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
          // Call Backend API
          const res = await fetch('/api/models/tools/scenario-generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+               'Content-Type': 'application/json',
+               'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({
                model: selectedModel,
                contents: [{ parts: [{ text: prompt }] }],
@@ -257,12 +271,15 @@ export const ReportModule: React.FC<ReportModuleProps> = ({ data, onExit, onRetr
    };
 
    const handleSaveResult = async () => {
-      if (!aiEvaluation) return;
+      if (!aiEvaluation || !token) return;
 
       try {
          const res = await fetch(`/api/history/${data.id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+               'Content-Type': 'application/json',
+               'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({
                score: aiEvaluation.totalScore,
                aiAnalysis: aiEvaluation

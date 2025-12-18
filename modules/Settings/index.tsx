@@ -4,6 +4,8 @@ import { ModelSelector } from './components/ModelSelector';
 import { VoiceSelector } from './components/VoiceSelector';
 import { ImageModelSelector } from './components/ImageModelSelector';
 import { UserSettings, APIModel, APIVoice } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+
 const DEFAULT_SETTINGS: UserSettings = {
   apiKeyConfigured: false,
   apiReady: false,
@@ -18,6 +20,7 @@ const SCENARIO_MODELS_FALLBACK: APIModel[] = [
 ];
 
 export const SettingsModule: React.FC = () => {
+  const { token, user } = useAuth();
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [models, setModels] = useState<APIModel[]>([]);
   const [scenarioModels, setScenarioModels] = useState<APIModel[]>([]);
@@ -27,11 +30,16 @@ export const SettingsModule: React.FC = () => {
 
   // 1. Initial Load: Settings from API & Fetch Models
   useEffect(() => {
+    if (!token) return;
+
     const loadSettingsAndModels = async () => {
       // Load Settings from API
       let apiSettings = {};
       try {
-        const res = await fetch('/api/users/profile', { cache: 'no-store' });
+        const res = await fetch('/api/users/profile', {
+          cache: 'no-store',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const profile = await res.json();
           apiSettings = profile.settings || {};
@@ -45,17 +53,14 @@ export const SettingsModule: React.FC = () => {
         ...apiSettings
       };
 
-      // Ensure we preserve fields that might map differently or exist
-      // The API settings key names match our UserSettings interface keys roughly
-      // We need to cast or map them.
-      // API: { selectedModel: "...", selectedVoice: "...", selectedScenarioModel: "..." }
-      // Frontend: same.
-
       setSettings(prev => ({ ...prev, ...loadedSettings }));
 
       // Fetch Voice Models
       try {
-        const res = await fetch('/api/models', { cache: 'no-store' }); // Uses proxy
+        const res = await fetch('/api/models', {
+          cache: 'no-store',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (!res.ok) throw new Error('Failed to load models');
         const data: APIModel[] = await res.json();
         setModels(data);
@@ -83,7 +88,10 @@ export const SettingsModule: React.FC = () => {
 
       // Fetch Scenario Models (New)
       try {
-        const res = await fetch('/api/models/scenario', { cache: 'no-store' });
+        const res = await fetch('/api/models/scenario', {
+          cache: 'no-store',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const data = await res.json();
           // Map simple dict to APIModel structure if needed, backend currently returns id, name, description
@@ -111,17 +119,19 @@ export const SettingsModule: React.FC = () => {
     };
 
     loadSettingsAndModels();
-  }, []);
+  }, [token]);
 
   // 2. Fetch Voices when Selected Model Changes
   useEffect(() => {
-    if (!settings.selectedModel) return;
+    if (!settings.selectedModel || !token) return;
 
     const fetchVoices = async () => {
       setLoadingVoices(true);
       try {
         // First get model details to see capabilities
-        const res = await fetch(`/api/models/${settings.selectedModel}`);
+        const res = await fetch(`/api/models/${settings.selectedModel}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const details = await res.json();
           // If model provides availableVoices in details
@@ -147,17 +157,21 @@ export const SettingsModule: React.FC = () => {
     if (models.length > 0) { // Only fetch if we have models loaded
       fetchVoices();
     }
-  }, [settings.selectedModel, models]);
+  }, [settings.selectedModel, models, token]);
 
   // Save Settings when changed
   const updateSettings = async (updates: Partial<UserSettings>) => {
+    if (!token) return;
+
     // 1. Optimistic Update
     const nextSettings = { ...settings, ...updates };
     setSettings(nextSettings);
 
     try {
       // 2. Fetch current profile settings to merge (safe update)
-      const resGet = await fetch('/api/users/profile');
+      const resGet = await fetch('/api/users/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       let currentSettings = {};
       if (resGet.ok) {
         const p = await resGet.json();
@@ -183,7 +197,10 @@ export const SettingsModule: React.FC = () => {
       // 4. Push update
       await fetch('/api/users/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           settings: payloadSettings
         })
@@ -288,23 +305,25 @@ export const SettingsModule: React.FC = () => {
         <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
 
         {/* Section 1.5: Scenario Model (Moved to Top) */}
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
-            场景生成模型 (Scenario Gen)
-            <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] rounded">Text/Multimodal</span>
-          </h3>
-          <ModelSelector
-            selectedModel={settings.selectedScenarioModel || 'gemini-2.5-flash'}
-            onSelect={(id) => updateSettings({ selectedScenarioModel: id })}
-            models={scenarioModels}
-            isLoading={loadingModels}
-          />
-          <p className="text-[10px] text-slate-400 mt-2">
-            用于读取 PDF 和生成场景配置的纯文本/多模态模型。推荐使用 Gemini 2.5 Flash。
-          </p>
-        </div>
+        {user?.role === 'admin' && (
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
+              场景生成模型 (Scenario Gen)
+              <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] rounded">Text/Multimodal</span>
+            </h3>
+            <ModelSelector
+              selectedModel={settings.selectedScenarioModel || 'gemini-2.5-flash'}
+              onSelect={(id) => updateSettings({ selectedScenarioModel: id })}
+              models={scenarioModels}
+              isLoading={loadingModels}
+            />
+            <p className="text-[10px] text-slate-400 mt-2">
+              用于读取 PDF 和生成场景配置的纯文本/多模态模型。推荐使用 Gemini 2.5 Flash。
+            </p>
+          </div>
+        )}
 
-        <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />
+        {user?.role === 'admin' && <div className="h-px bg-slate-200 w-full mb-6 mx-auto opacity-50" />}
 
         {/* Section 1.8: Image Model (New) */}
         <ImageModelSelector

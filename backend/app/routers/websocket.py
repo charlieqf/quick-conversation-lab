@@ -4,7 +4,7 @@ WebSocket Router - Voice session WebSocket endpoints
 import json
 import time
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Optional
 
 from app.adapters.base import SessionConfig, AudioConfig, VoiceConfig, AdapterStatus
@@ -17,9 +17,10 @@ router = APIRouter()
 
 
 @router.websocket("/ws/{model_id}")
-async def websocket_endpoint(websocket: WebSocket, model_id: str):
+async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optional[str] = Query(None)):
     """
     WebSocket endpoint for voice sessions.
+    Requires 'token' query parameter for authentication.
     
     Protocol:
     1. Client connects
@@ -32,9 +33,38 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     """
     await websocket.accept()
     
+    # 1. Authenticate
+    from app.core.security import ALGORITHM, SECRET_KEY
+    from jose import jwt, JWTError
+    from app.routers.auth import get_user
+    
+    user = None
+    if token:
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username: str = payload.get("sub")
+            if username:
+                with SessionLocal() as db:
+                     user = get_user(db, username=username)
+        except JWTError:
+             print("WS Auth Error: Invalid Token")
+             pass
+    
+    if not user:
+        print("WS Error: Authentication failed")
+        await websocket.send_json({
+            "type": "error",
+            "timestamp": int(time.time() * 1000),
+            "payload": {
+                "code": 4001,
+                "message": "Authentication required. Please provide a valid 'token' query parameter."
+            }
+        })
+        await websocket.close(code=4001)
+        return
+    
     # DEBUG LOGGING
-    # DEBUG LOGGING
-    print(f"WS Connect: Model={model_id}")
+    print(f"WS Connect: Model={model_id}, User={user.username}")
     try:
         # Check settings directly
         has_gemini = bool(settings.gemini_api_key)
@@ -199,22 +229,20 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                 # Fetch User API Key Override (if any)
                 user_api_key = None
                 try:
-                    with SessionLocal() as db:
-                        # Assuming single user 'admin' for now, consistent with users.py
-                        user = db.query(User).filter(User.username == "admin").first()
-                        if user and user.settings:
-                            # Map model_id to specific user setting key
-                            if model_id.startswith("gemini"):
-                                user_api_key = user.settings.get("customApiKey") # Classic name
-                            elif model_id.startswith("openai"):
-                                user_api_key = user.settings.get("customOpenaiKey")
-                            elif model_id.startswith("doubao"):
-                                user_api_key = user.settings.get("customDoubaoKey")
-                            elif model_id.startswith("tongyi"):
-                                user_api_key = user.settings.get("customQwenKey")
+                    # Use the pre-authenticated user
+                    if user and user.settings:
+                        # Map model_id to specific user setting key
+                        if model_id.startswith("gemini"):
+                            user_api_key = user.settings.get("customApiKey") # Classic name
+                        elif model_id.startswith("openai"):
+                            user_api_key = user.settings.get("customOpenaiKey")
+                        elif model_id.startswith("doubao"):
+                            user_api_key = user.settings.get("customDoubaoKey")
+                        elif model_id.startswith("tongyi"):
+                            user_api_key = user.settings.get("customQwenKey")
 
-                            if user_api_key:
-                                print(f"WS Info: Using User Custom API Key for {model_id}")
+                        if user_api_key:
+                            print(f"WS Info: Using User Custom API Key for {model_id}")
                 except Exception as e:
                     print(f"WS Error fetching user settings: {e}")
 

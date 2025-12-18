@@ -4,18 +4,20 @@ import { Save, Layers, CheckSquare, BookOpen, Hash, Settings, Plus, Trash2, Spar
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { ScenarioConfig, ThemeColor, ScoringDimension } from '../../../types';
+import { useAuth } from '../../../contexts/AuthContext';
+
 const THEME_CONFIG: Record<string, { bg: string }> = {
   blue: { bg: 'bg-blue-50' },
   purple: { bg: 'bg-purple-50' },
   orange: { bg: 'bg-orange-50' }
 };
 
-
 interface ConfigTabProps {
   config: ScenarioConfig;
   onChange: (newConfig: ScenarioConfig) => void;
   onSave: () => void;
   onLog: (msg: string, type: 'info' | 'error' | 'success', detail?: string) => void;
+  isReadOnly?: boolean;
 }
 
 const DEFAULT_DIMENSION_PROMPT = `Task: Extract scoring dimensions from the text below.
@@ -29,7 +31,8 @@ Requirements:
 Text:
 {criteria}`;
 
-export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, onLog }) => {
+export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, onLog, isReadOnly = false }) => {
+  const { token, user } = useAuth();
   const [isDimensionModalOpen, setIsDimensionModalOpen] = useState(false);
   const [tempDimensions, setTempDimensions] = useState<ScoringDimension[]>([]);
   const [isGeneratingDims, setIsGeneratingDims] = useState(false);
@@ -48,6 +51,13 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
   };
 
   const handleGenerateDimensions = async () => {
+    if (!token) return;
+
+    if (user?.role !== 'admin') {
+      alert("Permission Denied: Only admins can generate dimensions.");
+      return;
+    }
+
     if (!config.scoringCriteria) {
       alert("请先在下方文本框填写评分标准，AI 将基于内容生成维度。");
       return;
@@ -61,7 +71,9 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
 
       let selectedModel = 'gemini-2.5-flash';
       try {
-        const res = await fetch('/api/users/profile');
+        const res = await fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) {
           const p = await res.json();
           if (p.settings?.selectedScenarioModel) selectedModel = p.settings.selectedScenarioModel;
@@ -73,7 +85,10 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
 
       const res = await fetch('/api/models/tools/scenario-generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           model: selectedModel,
           contents: [{ parts: [{ text: prompt }] }],
@@ -92,7 +107,6 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
 
       const parsed = JSON.parse(text);
 
-      // Validate and format
       const newDims: ScoringDimension[] = parsed.map((d: any) => ({
         id: d.id || Date.now().toString() + Math.random(),
         label: d.label || 'Unknown',
@@ -132,7 +146,6 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
   };
 
   const handleSaveDimensions = () => {
-    // Filter out empty ones
     const valid = tempDimensions.filter(d => d.label.trim() !== '');
     updateField('scoringDimensions', valid);
     onLog(`维度配置已更新 (${valid.length} items)`, 'info');
@@ -154,7 +167,8 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
               type="text"
               value={config.title}
               onChange={(e) => updateField('title', e.target.value)}
-              className="w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 focus:outline-none bg-transparent"
+              disabled={isReadOnly}
+              className={`w-full border-b border-slate-200 py-1 text-sm focus:border-medical-500 focus:outline-none bg-transparent ${isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
             />
           </div>
 
@@ -164,7 +178,8 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
               type="text"
               value={config.subtitle}
               onChange={(e) => updateField('subtitle', e.target.value)}
-              className="w-full border-b border-slate-200 py-1 text-base font-bold text-slate-800 focus:border-medical-500 focus:outline-none bg-transparent"
+              disabled={isReadOnly}
+              className={`w-full border-b border-slate-200 py-1 text-base font-bold text-slate-800 focus:border-medical-500 focus:outline-none bg-transparent ${isReadOnly ? 'cursor-not-allowed opacity-60' : ''}`}
             />
           </div>
 
@@ -221,7 +236,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
         </div>
       </div>
 
-      {/* 2. AI Config Sections - Detailed Text Prompts */}
+      {/* 2. AI Config Sections */}
       <div className="space-y-4">
 
         {/* Section A: Workflow */}
@@ -307,6 +322,8 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({ config, onChange, onSave, 
         className="w-full py-3 sticky bottom-4 shadow-xl shadow-medical-900/10"
         icon={<Save className="w-4 h-4" />}
         onClick={onSave}
+        disabled={(user?.role !== 'admin') || isReadOnly}
+        title={(user?.role === 'admin' && !isReadOnly) ? "保存配置" : "仅管理员可保存"}
       >
         保存并退出
       </Button>

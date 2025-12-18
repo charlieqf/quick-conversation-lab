@@ -14,6 +14,9 @@ class User(Base):
     username = Column(String(100), unique=True, index=True, nullable=False) # Login ID
     avatar_url = Column(Text(4294967295), nullable=True) # URL path or Base64 data (LONGTEXT)
     settings = Column(JSON, nullable=True) # User-specific settings
+    hashed_password = Column(String(255), nullable=True) # Password hash
+    role = Column(String(50), default="user") # 'admin' or 'user'
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
