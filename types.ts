@@ -167,11 +167,14 @@ export interface InterruptionConfig {
 
 // --- Editor Types ---
 
+export type LogCategory = 'system' | 'transcript';
+
 export interface LogEntry {
   timestamp: string;
   message: string;
   type: 'info' | 'success' | 'error' | 'stream' | 'thought'; // Added thought type
   detail?: string; // For long content like JSON payload or stack trace
+  category?: LogCategory; // For role-based filtering (defaults to 'system')
 }
 
 export interface ScenarioConfig {

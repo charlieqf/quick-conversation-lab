@@ -65,6 +65,26 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
     
     # DEBUG LOGGING
     print(f"WS Connect: Model={model_id}, User={user.username}")
+    
+    # Role-based log filtering: determine if user is admin
+    is_admin = user.role == 'admin'
+    
+    # Helper function that adds category metadata to messages
+    # Messages are ALWAYS sent (for functionality), but include category for frontend log filtering
+    # Frontend will decide what to display based on category and user role
+    async def send_with_category(msg_type: str, payload: dict, category: str = 'system'):
+        """Send message with category metadata for frontend log filtering."""
+        await websocket.send_json({
+            "type": msg_type,
+            "timestamp": int(time.time() * 1000),
+            "payload": payload,
+            "category": category  # Frontend uses this to filter log display
+        })
+    
+    def send_with_category_sync(msg_type: str, payload: dict, category: str = 'system'):
+        """Sync wrapper for use in callbacks - creates async task."""
+        asyncio.create_task(send_with_category(msg_type, payload, category))
+    
     try:
         # Check settings directly
         has_gemini = bool(settings.gemini_api_key)
@@ -78,14 +98,10 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
     # Validate model
     if model_id not in ADAPTERS:
         print(f"WS Error: Model {model_id} not found")
-        await websocket.send_json({
-            "type": "error",
-            "timestamp": int(time.time() * 1000),
-            "payload": {
-                "code": 4002,
-                "message": f"Model '{model_id}' not found"
-            }
-        })
+        await send_with_category("error", {
+            "code": 4002,
+            "message": f"Model '{model_id}' not found"
+        }, 'system')
         await websocket.close(code=4002)
         return
     
@@ -104,46 +120,31 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
     def on_audio(data: str, sequence: int, is_final: bool):
         nonlocal audio_sequence
         audio_sequence = sequence
-        asyncio.create_task(websocket.send_json({
-            "type": "audio.output",
-            "timestamp": int(time.time() * 1000),
-            "payload": {
-                "data": data,
-                "sequence": sequence,
-                "isFinal": is_final
-            }
-        }))
+        send_with_category_sync("audio.output", {
+            "data": data,
+            "sequence": sequence,
+            "isFinal": is_final
+        }, 'system')
     
     def on_transcription(role: str, text: str, is_final: bool):
         if role == "system" and text == "TURN_COMPLETE":
-            asyncio.create_task(websocket.send_json({
-                "type": "turn.complete",
-                "timestamp": int(time.time() * 1000),
-                "payload": {}
-            }))
+            send_with_category_sync("turn.complete", {}, 'system')
         else:
-            asyncio.create_task(websocket.send_json({
-                "type": "transcription",
-                "timestamp": int(time.time() * 1000),
-                "payload": {
-                    "role": role,
-                    "text": text,
-                    "isFinal": is_final
-                }
-            }))
+            # Transcription logs are visible to ALL users
+            send_with_category_sync("transcription", {
+                "role": role,
+                "text": text,
+                "isFinal": is_final
+            }, 'transcript')
     
     async def handle_error_async(code: int, message: str):
         try:
             print(f"WS Handling Error: Code={code}, Message={message}")
             if websocket.client_state.name == "CONNECTED":
-                await websocket.send_json({
-                    "type": "error",
-                    "timestamp": int(time.time() * 1000),
-                    "payload": {
-                        "code": code,
-                        "message": message
-                    }
-                })
+                await send_with_category("error", {
+                    "code": code,
+                    "message": message
+                }, 'system')
                 # Use standard WS codes: 1008 (Policy Violation) for user errors, 1011 (Internal Error) for others
                 ws_close_code = 1008 if code < 4100 else 1011
                 await websocket.close(code=ws_close_code)
@@ -189,14 +190,10 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                 
                 # FIX: Reject disabled models early
                 if not cap.is_enabled:
-                    await websocket.send_json({
-                        "type": "error",
-                        "timestamp": int(time.time() * 1000),
-                        "payload": {
-                            "code": 4003,
-                            "message": f"Model '{model_id}' is disabled (check API key)"
-                        }
-                    })
+                    await send_with_category("error", {
+                        "code": 4003,
+                        "message": f"Model '{model_id}' is disabled (check API key)"
+                    }, 'system')
                     await websocket.close(code=4003)
                     return
 
@@ -240,6 +237,8 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                             user_api_key = user.settings.get("customDoubaoKey")
                         elif model_id.startswith("tongyi"):
                             user_api_key = user.settings.get("customQwenKey")
+                        elif model_id.startswith("grok"):
+                            user_api_key = user.settings.get("customXaiKey")
 
                         if user_api_key:
                             print(f"WS Info: Using User Custom API Key for {model_id}")
@@ -275,23 +274,18 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                          await websocket.close(code=4001, reason="Adapter failed to connect")
                     return
                 
-                await websocket.send_json({
-                    "type": "session.created",
-                    "timestamp": int(time.time() * 1000),
-                    "requestId": request_id,
-                    "payload": {
-                        "sessionId": session_id,
-                        "negotiated": {
-                            "sampleRate": config.audio.sample_rate,
-                            "encoding": config.audio.encoding,
-                            "voiceId": config.voice.voice_id
-                        },
-                        "capabilities": {
-                            "transcription": cap.supports_transcription,
-                            "interruption": cap.supports_interruption
-                        }
+                await send_with_category("session.created", {
+                    "sessionId": session_id,
+                    "negotiated": {
+                        "sampleRate": config.audio.sample_rate,
+                        "encoding": config.audio.encoding,
+                        "voiceId": config.voice.voice_id
+                    },
+                    "capabilities": {
+                        "transcription": cap.supports_transcription,
+                        "interruption": cap.supports_interruption
                     }
-                })
+                }, 'transcript')  # Visible to ALL users - important status feedback
             
             elif msg_type == "audio.input":
                 # Forward audio to model
@@ -300,14 +294,10 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                 
                 # Guard 1: Max payload size (64KB base64 ~= 48KB binary)
                 if len(data) > 64 * 1024:
-                    await websocket.send_json({
-                        "type": "error",
-                        "timestamp": int(time.time() * 1000),
-                        "payload": {
-                            "code": 4003,
-                            "message": "Audio chunk too large (max 64KB)"
-                        }
-                    })
+                    await send_with_category("error", {
+                        "code": 4003,
+                        "message": "Audio chunk too large (max 64KB)"
+                    }, 'system')
                     continue
 
                 # Guard 2: Sequence check (must be strictly increasing)
@@ -332,21 +322,17 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                      
                      # Warn once
                      if audio_chunks_in_window == 101:
-                         await websocket.send_json({
-                            "type": "warning",
-                            "timestamp": int(time.time() * 1000),
-                            "payload": {"code": 4004, "message": "Rate limit exceeded (audio dropping)"}
-                         })
+                         await send_with_category("warning", {
+                             "code": 4004, 
+                             "message": "Rate limit exceeded (audio dropping)"
+                         }, 'system')
                      continue
 
                 await adapter.send_audio(data, sequence)
             
             elif msg_type == "ping":
-                # Heartbeat
-                await websocket.send_json({
-                    "type": "pong",
-                    "timestamp": int(time.time() * 1000)
-                })
+                # Heartbeat - system category (admin only)
+                await send_with_category("pong", {}, 'system')
             
             elif msg_type == "session.end":
                 # End session
@@ -358,28 +344,20 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
         # Starlette throws "Need to call accept first" if socket is dead when we try to read
         pass
     except json.JSONDecodeError:
-        await websocket.send_json({
-            "type": "error",
-            "timestamp": int(time.time() * 1000),
-            "payload": {
-                "code": 4006,
-                "message": "Invalid JSON message"
-            }
-        })
+        await send_with_category("error", {
+            "code": 4006,
+            "message": "Invalid JSON message"
+        }, 'system')
     except Exception as e:
         print(f"WS Critical Error: {str(e)}")
         import traceback
         traceback.print_exc()
         try:
             if websocket.client_state.name == "CONNECTED":
-                await websocket.send_json({
-                    "type": "error",
-                    "timestamp": int(time.time() * 1000),
-                    "payload": {
-                        "code": 4100,
-                        "message": str(e)
-                    }
-                })
+                await send_with_category("error", {
+                    "code": 4100,
+                    "message": str(e)
+                }, 'system')
         except Exception:
             pass
     finally:

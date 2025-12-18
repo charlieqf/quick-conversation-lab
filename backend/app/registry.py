@@ -1,5 +1,6 @@
 from .adapters.gemini import GeminiAdapter
 from .adapters.openai import OpenAIAdapter
+from .adapters.grok import GrokAdapter
 from .adapters.tongyi import TongyiAdapter
 from .adapters.doubao import DoubaoAdapter
 
@@ -8,6 +9,7 @@ from .adapters.doubao import DoubaoAdapter
 ADAPTERS = {
     "gemini": GeminiAdapter,
     "openai-realtime": OpenAIAdapter,
+    "grok-beta": GrokAdapter,
     "tongyi-realtime": TongyiAdapter,
     "doubao-realtime": DoubaoAdapter,
 }

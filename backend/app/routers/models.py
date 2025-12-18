@@ -52,6 +52,10 @@ async def list_models(response: Response, current_user: User = Depends(get_curre
             has_server_key = bool(settings.openai_api_key)
             has_user_key = bool(user_settings.get("customOpenaiKey"))
             is_enabled = has_server_key or has_user_key
+        elif "grok" in adapter_id.lower():
+            has_server_key = bool(settings.xai_api_key)
+            has_user_key = bool(user_settings.get("customXaiKey"))
+            is_enabled = has_server_key or has_user_key
         # Add other providers here as needed (e.g. doubao, tongyi)
 
         models.append({

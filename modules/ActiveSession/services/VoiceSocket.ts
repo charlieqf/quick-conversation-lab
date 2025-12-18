@@ -2,7 +2,7 @@
 export class VoiceSocket {
     private ws: WebSocket | null = null;
     private url: string;
-    private logCallback: (msg: string, type: 'info' | 'error' | 'stream') => void;
+    private logCallback: (msg: string, type: 'info' | 'error' | 'stream', category?: 'system' | 'transcript') => void;
     private onAudioCallback: (b64: string) => void;
     private onTranscriptCallback: (role: 'user' | 'model' | 'system', text: string) => void;
     private onErrorCallback: (err: any) => void;
@@ -11,7 +11,7 @@ export class VoiceSocket {
     constructor(
         modelId: string,
         token: string, // Auth Token
-        onLog: (msg: string, type: 'info' | 'error' | 'stream') => void,
+        onLog: (msg: string, type: 'info' | 'error' | 'stream', category?: 'system' | 'transcript') => void,
         onAudio: (b64: string) => void,
         onTranscript: (role: 'user' | 'model' | 'system', text: string) => void,
         onError: (err: any) => void
@@ -147,17 +147,18 @@ export class VoiceSocket {
 
         const type = msg.type;
         const payload = msg.payload;
+        const category = msg.category || 'system'; // Use server-provided category for log filtering
 
         if (!type || !payload) return;
 
         switch (type) {
             case 'session.created':
-                this.logCallback(`Session Created: ${payload.sessionId}`, 'info');
+                this.logCallback(`Session Created: ${payload.sessionId}`, 'info', category);
                 break;
 
             case 'audio.output':
                 if (payload.data) {
-                    this.logCallback(`RX Audio (${payload.data.length} chars)`, 'stream');
+                    this.logCallback(`RX Audio (${payload.data.length} chars)`, 'stream', category);
                     this.onAudioCallback(payload.data);
                 }
                 break;
@@ -169,23 +170,23 @@ export class VoiceSocket {
                 break;
 
             case 'turn.complete':
-                this.logCallback('Turn Complete.', 'info');
+                this.logCallback('Turn Complete.', 'info', category);
                 this.onTranscriptCallback('system', 'TURN_COMPLETE');
                 break;
 
             case 'error':
-                this.logCallback(`Server Error: ${payload.code} ${payload.message}`, 'error');
+                this.logCallback(`Server Error: ${payload.code} ${payload.message}`, 'error', category);
                 this.onErrorCallback(new Error(`[${payload.code}] ${payload.message}`));
                 this.disconnect(); // Force disconnect on critical error
                 break;
 
             case 'warning':
-                this.logCallback(`Server Warning: ${payload.code} ${payload.message}`, 'error');
+                this.logCallback(`Server Warning: ${payload.code} ${payload.message}`, 'error', category);
                 break;
 
             default:
                 // Debug visibility for unexpected messages
-                this.logCallback(`RX ${type}`, 'info');
+                this.logCallback(`RX ${type}`, 'info', category);
                 break;
         }
     }

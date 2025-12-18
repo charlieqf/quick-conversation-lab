@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # API Keys
     gemini_api_key: str = ""
     openai_api_key: str = ""
+    xai_api_key: str = ""
     
     # Google Cloud
     gcp_project_id: str = ""

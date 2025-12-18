@@ -52,12 +52,12 @@ export const useSessionConnection = (scenarioId: string, roleId: string) => {
   const audioBufferQueue = useRef<Int16Array[]>([]);
   const nextPlayTime = useRef<number>(0);
 
-  // Logging Helper
-  const log = useCallback((msg: string, type: 'info' | 'error' | 'stream' = 'info') => {
+  // Logging Helper with role-based category support
+  const log = useCallback((msg: string, type: 'info' | 'error' | 'stream' = 'info', category: 'system' | 'transcript' = 'system') => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => {
       // Limit to latest 100 entries
-      const newLogs = [...prev, { timestamp: time, message: msg, type }];
+      const newLogs = [...prev, { timestamp: time, message: msg, type, category }];
       if (newLogs.length > 100) {
         return newLogs.slice(newLogs.length - 100);
       }
@@ -192,7 +192,7 @@ Do not break character. Speak Chinese.
       const socket = new VoiceSocket(
         userSettings.selectedModel,
         token, // Pass Token
-        (msg, type) => log(msg, type),
+        (msg, type, category) => log(msg, type, category || 'system'),
         (b64) => playAudioChunk(b64),
         (role, text) => {
           if (role === 'system' && text === 'TURN_COMPLETE') {
@@ -207,7 +207,7 @@ Do not break character. Speak Chinese.
                 type: 'text',
                 content: user.trim()
               });
-              log(`Transcript [User]: ${user.substring(0, 30)}...`, 'info');
+              log(`Transcript [User]: ${user.substring(0, 30)}...`, 'info', 'transcript');
             }
 
             if (model.trim()) {
@@ -217,7 +217,7 @@ Do not break character. Speak Chinese.
                 type: 'text',
                 content: model.trim()
               });
-              log(`Transcript [Model]: ${model.substring(0, 30)}...`, 'info');
+              log(`Transcript [Model]: ${model.substring(0, 30)}...`, 'info', 'transcript');
             }
 
             currentTurnRef.current = { user: '', model: '' };
