@@ -131,9 +131,8 @@ class TongyiAdapter(BaseModelAdapter):
             return
 
         # Debug log for sending audio
-        # Log every 5 packets (~0.5s) to be sure we see it
-        if sequence % 5 == 0:
-            print(f"Tongyi Sending audio seq={sequence} len={len(audio_base64)}")
+        # if sequence % 50 == 0:
+        #    print(f"Tongyi Sending audio seq={sequence} len={len(audio_base64)}")
 
         msg = {
             "type": "input_audio_buffer.append",

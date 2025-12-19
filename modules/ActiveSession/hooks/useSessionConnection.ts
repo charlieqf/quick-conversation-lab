@@ -178,7 +178,7 @@ Do not break character. Speak Chinese.
                 offset += b.length;
               }
               const b64 = arrayBufferToBase64(merged.buffer);
-              console.log(`[Frontend] Sending Audio Chunk: ${totalLen} samples`);
+              // console.log(`[Frontend] Sending Audio Chunk: ${totalLen} samples`);
               socketRef.current.sendAudioChunk(b64);
             } else {
               console.warn('[Frontend] Socket not ready, dropping audio');
