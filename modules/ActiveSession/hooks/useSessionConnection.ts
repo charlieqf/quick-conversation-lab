@@ -163,6 +163,7 @@ Do not break character. Speak Chinese.
       const streamer = new AudioStreamer(
         (pcmFloat32) => {
           // On Microphone Data
+          // console.log('Mic Data:', pcmFloat32.length); // Too spammy, maybe log every 100?
           const int16 = float32ToInt16(pcmFloat32);
 
           audioBufferQueue.current.push(int16);
@@ -177,12 +178,18 @@ Do not break character. Speak Chinese.
                 offset += b.length;
               }
               const b64 = arrayBufferToBase64(merged.buffer);
+              console.log(`[Frontend] Sending Audio Chunk: ${totalLen} samples`);
               socketRef.current.sendAudioChunk(b64);
+            } else {
+              console.warn('[Frontend] Socket not ready, dropping audio');
             }
             audioBufferQueue.current = [];
           }
         },
-        (msg, type) => log(msg, type as any)
+        (msg, type) => {
+          console.log(`[Streamer] ${msg}`);
+          log(msg, type as any);
+        }
       );
 
       streamerRef.current = streamer;

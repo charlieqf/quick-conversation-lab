@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     xai_api_key: str = ""
+    dashscope_api_key: str = ""
     
     # Google Cloud
     gcp_project_id: str = ""
