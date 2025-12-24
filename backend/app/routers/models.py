@@ -64,6 +64,10 @@ async def list_models(response: Response, current_user: User = Depends(get_curre
             has_server_key = bool(settings.volc_app_id and settings.volc_access_key)
             has_user_key = bool(user_settings.get("customDoubaoKey"))
             is_enabled = has_server_key or has_user_key
+        elif "elevenlabs" in adapter_id.lower():
+            has_server_key = bool(settings.elevenlabs_api_key and settings.elevenlabs_agent_id)
+            has_user_key = bool(user_settings.get("customElevenLabsKey"))
+            is_enabled = has_server_key or has_user_key
         # Add other providers here as needed (e.g. minimax)
 
         models.append({

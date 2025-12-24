@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     volc_access_key: str = "" # From Speech Console (the Token)
     volc_secret_key: str = "" # From Speech Console
     volc_app_id: str = "" # From Speech Console
+    elevenlabs_api_key: str = "" # Eleven Labs API Key
+    elevenlabs_agent_id: str = "" # Eleven Labs Agent ID
     
     # Google Cloud
     gcp_project_id: str = ""
