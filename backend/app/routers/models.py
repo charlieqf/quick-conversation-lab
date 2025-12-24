@@ -60,7 +60,11 @@ async def list_models(response: Response, current_user: User = Depends(get_curre
             has_server_key = bool(getattr(settings, "dashscope_api_key", None) or os.getenv("DASHSCOPE_API_KEY"))
             has_user_key = bool(user_settings.get("customQwenKey"))
             is_enabled = has_server_key or has_user_key
-        # Add other providers here as needed (e.g. doubao, tongyi)
+        elif "doubao" in adapter_id.lower():
+            has_server_key = bool(settings.volc_app_id and settings.volc_access_key)
+            has_user_key = bool(user_settings.get("customDoubaoKey"))
+            is_enabled = has_server_key or has_user_key
+        # Add other providers here as needed (e.g. minimax)
 
         models.append({
             "id": cap.id,

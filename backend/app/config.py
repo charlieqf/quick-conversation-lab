@@ -3,6 +3,7 @@ Application configuration using pydantic-settings
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+from typing import List, Optional # Added Optional import
 import os
 
 
@@ -12,6 +13,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     xai_api_key: str = ""
     dashscope_api_key: str = ""
+    volc_api_key: str = "" # Legacy / Ark API Key
+    volc_access_key: str = "" # From Speech Console (the Token)
+    volc_secret_key: str = "" # From Speech Console
+    volc_app_id: str = "" # From Speech Console
     
     # Google Cloud
     gcp_project_id: str = ""

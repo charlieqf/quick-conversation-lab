@@ -127,10 +127,12 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
         }, 'system')
     
     def on_transcription(role: str, text: str, is_final: bool):
-        if role == "system" and text == "TURN_COMPLETE":
-            send_with_category_sync("turn.complete", {}, 'system')
+        if role == "system":
+            if text == "TURN_COMPLETE":
+                send_with_category_sync("turn.complete", {}, 'system')
+            # Ignore other system messages (diagnostics) - only needed during debugging
         else:
-            # Transcription logs are visible to ALL users
+            # Player/Model transcription logs
             send_with_category_sync("transcription", {
                 "role": role,
                 "text": text,
@@ -144,7 +146,7 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                 await send_with_category("error", {
                     "code": code,
                     "message": message
-                }, 'system')
+                }, 'transcript')
                 # Use standard WS codes: 1008 (Policy Violation) for user errors, 1011 (Internal Error) for others
                 ws_close_code = 1008 if code < 4100 else 1011
                 await websocket.close(code=ws_close_code)
@@ -265,13 +267,13 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str, token: Optiona
                 await adapter.connect(config)
                 print(f"WS Info: Adapter status: {adapter.status}")
                 
-                # FIX: Check if connection actually succeeded using Enum
+                # Check if connection actually succeeded
                 if adapter.status != AdapterStatus.CONNECTED:
-                    # Error is already emitted by adapter via on_error callback if connect failed
-                    # But we ensure we return if status is not connected
-                    print(f"WS Error: Connection failed for {model_id}")
-                    if websocket.client_state.name == "CONNECTED": # Check if WS still open
-                         await websocket.close(code=4001, reason="Adapter failed to connect")
+                    print(f"WS Error: Connection failed for {model_id} with status {adapter.status}")
+                    # If an error task was started, wait a moment for it to send the JSON error message
+                    await asyncio.sleep(0.5)
+                    if websocket.client_state.name == "CONNECTED":
+                         await websocket.close(code=4001, reason=f"Adapter failed to connect (Status: {adapter.status})")
                     return
                 
                 await send_with_category("session.created", {
